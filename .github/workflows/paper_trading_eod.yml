@@ -1,0 +1,55 @@
+name: Paper Trading EOD
+
+on:
+  schedule:
+    # 10:05 UTC = 15:35 IST, Mon–Fri (after NSE close)
+    - cron: "5 10 * * 1-5"
+  workflow_dispatch:  # allows manual trigger from GitHub UI anytime
+
+jobs:
+  paper-eod:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements-deploy.txt
+
+      - name: Restore database from previous run
+        uses: actions/cache@v4
+        with:
+          path: |
+            market_data.db
+            models/saved/ensemble.pkl
+          key: paper-trading-data-${{ github.run_number }}
+          restore-keys: |
+            paper-trading-data-
+
+      - name: Run EOD paper trading pass
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          ALERT_EMAIL_FROM:      ${{ secrets.ALERT_EMAIL_FROM }}
+          ALERT_EMAIL_PASSWORD:  ${{ secrets.ALERT_EMAIL_PASSWORD }}
+          ALERT_EMAIL_TO:        ${{ secrets.ALERT_EMAIL_TO }}
+          ALERT_MIN_CONFIDENCE:  "0.55"
+          DATA_ADAPTER: "yfinance"
+        run: python main.py paper --once
+
+      - name: Save updated database
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: |
+            market_data.db
+            models/saved/ensemble.pkl
+          key: paper-trading-data-${{ github.run_number }}
