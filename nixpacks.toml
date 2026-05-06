@@ -1,0 +1,14 @@
+[phases.setup]
+nixPkgs = ["python311"]
+
+[phases.install]
+cmds = ["pip install -r requirements-deploy.txt"]
+
+[phases.build]
+cmds = [
+  # Copy pre-trained model and database to persistent volume if they exist
+  "python -c \"import shutil, os; [shutil.copy(src, dst) for src, dst in [('market_data.db', os.path.join(os.getenv('DATA_DIR',''), 'market_data.db')), ('models/saved/ensemble.pkl', os.path.join(os.getenv('DATA_DIR',''), 'models/saved/ensemble.pkl'))] if os.getenv('DATA_DIR') and os.path.exists(src) and not os.path.exists(dst)]\""
+]
+
+[start]
+cmd = "uvicorn api.app:app --host 0.0.0.0 --port $PORT"

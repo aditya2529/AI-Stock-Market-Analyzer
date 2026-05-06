@@ -1,0 +1,9 @@
+logs/
+__pycache__/
+*.pyc
+.pytest_cache/
+tests/
+*.log
+backtest_report.json
+forward_review.json
+scripts/

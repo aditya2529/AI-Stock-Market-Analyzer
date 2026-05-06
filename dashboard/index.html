@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-gray-950">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Stock Analyzer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: { extend: { colors: { gray: { 950: '#0a0a0f' } } } }
+    }
+  </script>
+  <style>
+    body { font-family: 'Inter', system-ui, sans-serif; }
+    .card { @apply bg-gray-900 border border-gray-800 rounded-xl p-5; }
+    .badge-buy    { @apply bg-emerald-500/20 text-emerald-400 border border-emerald-500/30; }
+    .badge-sell   { @apply bg-red-500/20 text-red-400 border border-red-500/30; }
+    .badge-hold   { @apply bg-gray-500/20 text-gray-400 border border-gray-600/30; }
+    .badge-regime-trending_up   { @apply bg-emerald-500/20 text-emerald-300; }
+    .badge-regime-trending_down { @apply bg-red-500/20 text-red-300; }
+    .badge-regime-sideways      { @apply bg-yellow-500/20 text-yellow-300; }
+    .badge-regime-high_vol      { @apply bg-orange-500/20 text-orange-300; }
+    .pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+  </style>
+</head>
+<body class="h-full text-gray-100 dark">
+
+<!-- ── Header ─────────────────────────────────────────────────────────── -->
+<header class="border-b border-gray-800 bg-gray-900/80 backdrop-blur sticky top-0 z-10">
+  <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 rounded-lg bg-emerald-500 flex items-center justify-center text-white font-bold text-sm">AI</div>
+      <span class="font-semibold text-lg">Stock Analyzer</span>
+      <span class="text-xs text-gray-500 ml-2">Phase 2 — Paper Trading</span>
+    </div>
+    <div class="flex items-center gap-4">
+      <div id="status-dot" class="w-2 h-2 rounded-full bg-gray-600"></div>
+      <span id="status-text" class="text-xs text-gray-500">connecting…</span>
+      <input id="symbol-input" type="text" placeholder="Add symbol…"
+        class="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm w-36 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/50" />
+      <button onclick="addSymbol()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-sm px-3 py-1.5 rounded-lg transition-colors">
+        + Watch
+      </button>
+      <button onclick="refreshAll()" class="text-gray-400 hover:text-white text-sm px-3 py-1.5 rounded-lg border border-gray-700 hover:border-gray-600 transition-colors">
+        ↻ Refresh
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- ── Main ───────────────────────────────────────────────────────────── -->
+<main class="max-w-7xl mx-auto px-6 py-6 space-y-6">
+
+  <!-- Portfolio Summary Row -->
+  <section>
+    <h2 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Portfolio</h2>
+    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+      <div class="card col-span-1">
+        <div class="text-xs text-gray-500 mb-1">Total Value</div>
+        <div id="pf-total" class="text-xl font-bold text-white">—</div>
+      </div>
+      <div class="card col-span-1">
+        <div class="text-xs text-gray-500 mb-1">Cash</div>
+        <div id="pf-cash" class="text-xl font-bold text-white">—</div>
+      </div>
+      <div class="card col-span-1">
+        <div class="text-xs text-gray-500 mb-1">Total PnL</div>
+        <div id="pf-pnl" class="text-xl font-bold">—</div>
+      </div>
+      <div class="card col-span-1">
+        <div class="text-xs text-gray-500 mb-1">Win Rate</div>
+        <div id="pf-wr" class="text-xl font-bold text-white">—</div>
+      </div>
+      <div class="card col-span-1">
+        <div class="text-xs text-gray-500 mb-1">Max Drawdown</div>
+        <div id="pf-dd" class="text-xl font-bold text-orange-400">—</div>
+      </div>
+      <div class="card col-span-1">
+        <div class="text-xs text-gray-500 mb-1">Open Positions</div>
+        <div id="pf-open" class="text-xl font-bold text-white">—</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Equity Curve + Signal Feed -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+    <!-- Equity Chart -->
+    <div class="card lg:col-span-2">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-semibold text-white">Equity Curve</h2>
+        <span class="text-xs text-gray-500">Paper portfolio value over time</span>
+      </div>
+      <div class="h-56">
+        <canvas id="equity-chart"></canvas>
+      </div>
+    </div>
+
+    <!-- Signal Feed -->
+    <div class="card">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="font-semibold text-white">Signal Feed</h2>
+        <span id="signal-count" class="text-xs text-gray-500">0 signals</span>
+      </div>
+      <div id="signal-feed" class="space-y-2 max-h-56 overflow-y-auto">
+        <div class="text-sm text-gray-600 py-4 text-center">No signals yet — add symbols above</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Watchlist / Regime Panel -->
+  <section>
+    <h2 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Watchlist</h2>
+    <div id="watchlist" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+      <div class="text-sm text-gray-600 col-span-full py-6 text-center">
+        Add symbols using the input above to see live signals and regime data.
+      </div>
+    </div>
+  </section>
+
+  <!-- Open Positions -->
+  <section>
+    <h2 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Open Positions</h2>
+    <div class="card overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-gray-500 text-left border-b border-gray-800">
+            <th class="pb-2 pr-6">Symbol</th>
+            <th class="pb-2 pr-6">Shares</th>
+            <th class="pb-2 pr-6">Entry</th>
+            <th class="pb-2 pr-6">Stop-Loss</th>
+            <th class="pb-2 pr-6">Target</th>
+            <th class="pb-2 pr-6">Regime</th>
+            <th class="pb-2">Confidence</th>
+          </tr>
+        </thead>
+        <tbody id="positions-table">
+          <tr><td colspan="7" class="py-4 text-gray-600 text-center">No open positions</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Trade History -->
+  <section>
+    <h2 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Trade History</h2>
+    <div class="card overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-gray-500 text-left border-b border-gray-800">
+            <th class="pb-2 pr-6">Symbol</th>
+            <th class="pb-2 pr-6">Entry</th>
+            <th class="pb-2 pr-6">Exit</th>
+            <th class="pb-2 pr-6">Shares</th>
+            <th class="pb-2 pr-6">Net PnL</th>
+            <th class="pb-2 pr-6">Return</th>
+            <th class="pb-2">Reason</th>
+          </tr>
+        </thead>
+        <tbody id="trades-table">
+          <tr><td colspan="7" class="py-4 text-gray-600 text-center">No closed trades yet</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</main>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────
+const API = '';  // same origin
+let watchlist = JSON.parse(localStorage.getItem('watchlist') || '["RELIANCE.NS","TCS.NS","BTCUSDT"]');
+let signalCache = {};
+let equityChart = null;
+
+// ── Helpers ────────────────────────────────────────────────────────────
+const fmt = (n, decimals=2) => n == null ? '—' : Number(n).toLocaleString('en-IN', {minimumFractionDigits: decimals, maximumFractionDigits: decimals});
+const fmtPct = (n) => n == null ? '—' : (Number(n)*100).toFixed(1)+'%';
+const fmtMoney = (n) => n == null ? '—' : '₹'+fmt(n);
+
+function signalBadge(sig) {
+  const cls = sig === 'BUY' ? 'badge-buy' : sig === 'SELL' ? 'badge-sell' : 'badge-hold';
+  const icon = sig === 'BUY' ? '▲' : sig === 'SELL' ? '▼' : '—';
+  return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold ${cls}">${icon} ${sig}</span>`;
+}
+
+function regimeBadge(r) {
+  const key = (r||'').toLowerCase().replace(' ','_');
+  const icons = { trending_up:'📈', trending_down:'📉', sideways:'➡️', high_vol:'⚡', unknown:'❓' };
+  return `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs badge-regime-${key}">${icons[key]||'❓'} ${r||'?'}</span>`;
+}
+
+function setStatus(ok) {
+  document.getElementById('status-dot').className = `w-2 h-2 rounded-full ${ok ? 'bg-emerald-500' : 'bg-red-500'}`;
+  document.getElementById('status-text').textContent = ok ? 'connected' : 'error';
+}
+
+// ── Portfolio ──────────────────────────────────────────────────────────
+async function loadPortfolio() {
+  try {
+    const pf = await fetch(`${API}/api/portfolio`).then(r=>r.json());
+    document.getElementById('pf-total').textContent = fmtMoney(pf.total_value);
+    document.getElementById('pf-cash').textContent  = fmtMoney(pf.cash);
+    const pnlEl = document.getElementById('pf-pnl');
+    pnlEl.textContent = (pf.total_pnl >= 0 ? '+' : '') + fmtMoney(pf.total_pnl);
+    pnlEl.className = `text-xl font-bold ${pf.total_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`;
+    document.getElementById('pf-wr').textContent   = fmtPct(pf.win_rate);
+    document.getElementById('pf-dd').textContent   = fmtPct(pf.drawdown_pct);
+    document.getElementById('pf-open').textContent = pf.open_positions.length;
+    renderPositions(pf.open_positions);
+    setStatus(true);
+  } catch(e) { setStatus(false); }
+}
+
+function renderPositions(positions) {
+  const tb = document.getElementById('positions-table');
+  if (!positions.length) {
+    tb.innerHTML = '<tr><td colspan="7" class="py-4 text-gray-600 text-center">No open positions</td></tr>';
+    return;
+  }
+  tb.innerHTML = positions.map(p => `
+    <tr class="border-t border-gray-800/50 hover:bg-gray-800/30">
+      <td class="py-2 pr-6 font-mono font-semibold">${p.symbol}</td>
+      <td class="py-2 pr-6">${p.shares}</td>
+      <td class="py-2 pr-6">${fmtMoney(p.entry_price)}</td>
+      <td class="py-2 pr-6 text-red-400">${fmtMoney(p.stop_loss)}</td>
+      <td class="py-2 pr-6 text-emerald-400">${fmtMoney(p.target)}</td>
+      <td class="py-2 pr-6">${regimeBadge(p.regime)}</td>
+      <td class="py-2">${p.confidence ? fmtPct(p.confidence) : '—'}</td>
+    </tr>`).join('');
+}
+
+// ── Trades ─────────────────────────────────────────────────────────────
+async function loadTrades() {
+  try {
+    const trades = await fetch(`${API}/api/portfolio/trades?limit=20`).then(r=>r.json());
+    const tb = document.getElementById('trades-table');
+    if (!trades.length) {
+      tb.innerHTML = '<tr><td colspan="7" class="py-4 text-gray-600 text-center">No closed trades yet</td></tr>';
+      return;
+    }
+    const reasonLabel = { target:'🎯 Target', stop_loss:'🛡️ Stop', signal:'📡 Signal' };
+    tb.innerHTML = trades.map(t => {
+      const pos = t.net_pnl >= 0;
+      return `<tr class="border-t border-gray-800/50 hover:bg-gray-800/30">
+        <td class="py-2 pr-6 font-mono font-semibold">${t.symbol}</td>
+        <td class="py-2 pr-6 text-xs text-gray-400">${(t.entry_time||'').slice(0,10)}</td>
+        <td class="py-2 pr-6 text-xs text-gray-400">${(t.exit_time||'').slice(0,10)}</td>
+        <td class="py-2 pr-6">${t.shares}</td>
+        <td class="py-2 pr-6 font-semibold ${pos?'text-emerald-400':'text-red-400'}">${pos?'+':''}${fmtMoney(t.net_pnl)}</td>
+        <td class="py-2 pr-6 ${pos?'text-emerald-400':'text-red-400'}">${pos?'+':''}${fmtPct(t.return_pct)}</td>
+        <td class="py-2 text-xs text-gray-400">${reasonLabel[t.exit_reason]||t.exit_reason}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) {}
+}
+
+// ── Equity Chart ───────────────────────────────────────────────────────
+async function loadEquityChart() {
+  try {
+    const data = await fetch(`${API}/api/portfolio/equity`).then(r=>r.json());
+    const labels = data.map(d => d.timestamp.slice(0,16).replace('T',' '));
+    const values = data.map(d => d.total_value);
+
+    if (equityChart) equityChart.destroy();
+    const ctx = document.getElementById('equity-chart').getContext('2d');
+    equityChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [{
+          label: 'Portfolio Value',
+          data: values,
+          borderColor: '#10b981',
+          backgroundColor: 'rgba(16,185,129,0.08)',
+          borderWidth: 2,
+          pointRadius: 0,
+          fill: true,
+          tension: 0.3,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { display: false },
+          y: {
+            grid: { color: 'rgba(255,255,255,0.05)' },
+            ticks: { color: '#6b7280', callback: v => '₹'+Number(v).toLocaleString('en-IN') }
+          }
+        }
+      }
+    });
+  } catch(e) {}
+}
+
+// ── Signals / Watchlist ────────────────────────────────────────────────
+async function loadSignal(symbol) {
+  try {
+    const s = await fetch(`${API}/api/signals/${encodeURIComponent(symbol)}`).then(r=>r.json());
+    signalCache[symbol] = s;
+    return s;
+  } catch(e) {
+    return null;
+  }
+}
+
+async function refreshWatchlist() {
+  const grid = document.getElementById('watchlist');
+  const feed = document.getElementById('signal-feed');
+  const signals = [];
+
+  for (const sym of watchlist) {
+    const s = await loadSignal(sym);
+    if (s && !s.error) signals.push(s);
+  }
+
+  // Render watchlist cards
+  if (!watchlist.length) {
+    grid.innerHTML = '<div class="text-sm text-gray-600 col-span-full py-6 text-center">Add symbols above to watch</div>';
+  } else {
+    grid.innerHTML = watchlist.map(sym => {
+      const s = signalCache[sym];
+      if (!s || s.error) return `
+        <div class="card flex flex-col gap-2">
+          <div class="flex items-center justify-between">
+            <span class="font-mono font-bold">${sym}</span>
+            <button onclick="removeSymbol('${sym}')" class="text-gray-600 hover:text-red-400 text-xs">✕</button>
+          </div>
+          <div class="text-xs text-red-400">${s?.error || 'Loading…'}</div>
+        </div>`;
+      return `
+        <div class="card flex flex-col gap-3 hover:border-gray-700 transition-colors">
+          <div class="flex items-center justify-between">
+            <span class="font-mono font-bold text-white">${sym}</span>
+            <button onclick="removeSymbol('${sym}')" class="text-gray-600 hover:text-red-400 text-xs">✕</button>
+          </div>
+          <div class="flex items-center gap-2">
+            ${signalBadge(s.signal)}
+            ${regimeBadge(s.regime)}
+          </div>
+          <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+            <span class="text-gray-500">Price</span>
+            <span class="text-right font-mono">₹${fmt(s.price)}</span>
+            <span class="text-gray-500">Confidence</span>
+            <span class="text-right">${fmtPct(s.confidence)}</span>
+            <span class="text-gray-500">Stop-Loss</span>
+            <span class="text-right text-red-400 font-mono">₹${fmt(s.stop_loss)}</span>
+            <span class="text-gray-500">Target</span>
+            <span class="text-right text-emerald-400 font-mono">₹${fmt(s.target)}</span>
+            <span class="text-gray-500">R:R</span>
+            <span class="text-right">${s.risk_reward}x</span>
+          </div>
+          ${s.reasons && s.reasons.length ? `
+          <div class="text-xs text-gray-500 border-t border-gray-800 pt-2">
+            ${s.reasons.slice(0,2).map(r=>`<div class="truncate">· ${r}</div>`).join('')}
+          </div>` : ''}
+        </div>`;
+    }).join('');
+  }
+
+  // Render signal feed (BUY/SELL only)
+  const actionSignals = signals.filter(s => s.signal !== 'HOLD');
+  document.getElementById('signal-count').textContent = `${actionSignals.length} active`;
+  if (!actionSignals.length) {
+    feed.innerHTML = '<div class="text-sm text-gray-600 py-4 text-center">All signals: HOLD</div>';
+  } else {
+    feed.innerHTML = actionSignals.map(s => `
+      <div class="flex items-center justify-between py-2 border-b border-gray-800/50 last:border-0">
+        <div class="flex items-center gap-2">
+          ${signalBadge(s.signal)}
+          <span class="text-sm font-mono font-semibold">${s.symbol}</span>
+        </div>
+        <div class="text-right text-xs text-gray-400">
+          <div class="font-mono text-white">₹${fmt(s.price)}</div>
+          <div>${fmtPct(s.confidence)} conf</div>
+        </div>
+      </div>`).join('');
+  }
+}
+
+// ── Symbol management ──────────────────────────────────────────────────
+function addSymbol() {
+  const input = document.getElementById('symbol-input');
+  const sym = input.value.trim().toUpperCase();
+  if (!sym || watchlist.includes(sym)) { input.value=''; return; }
+  watchlist.push(sym);
+  localStorage.setItem('watchlist', JSON.stringify(watchlist));
+  input.value = '';
+  refreshWatchlist();
+}
+
+function removeSymbol(sym) {
+  watchlist = watchlist.filter(s => s !== sym);
+  localStorage.setItem('watchlist', JSON.stringify(watchlist));
+  delete signalCache[sym];
+  refreshWatchlist();
+}
+
+document.getElementById('symbol-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') addSymbol();
+});
+
+// ── Full refresh ───────────────────────────────────────────────────────
+async function refreshAll() {
+  await Promise.all([
+    loadPortfolio(),
+    loadTrades(),
+    loadEquityChart(),
+    refreshWatchlist(),
+  ]);
+}
+
+// ── Init + auto-refresh every 5 min ────────────────────────────────────
+refreshAll();
+setInterval(refreshAll, 5 * 60 * 1000);
+</script>
+</body>
+</html>

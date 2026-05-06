@@ -1,0 +1,18 @@
+# Secrets — never commit
+.env
+
+# Logs and reports
+logs/
+*.log
+backtest_report.json
+forward_review.json
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# market_data.db and ensemble.pkl ARE committed so Railway has seed data on first deploy.
+# After first deploy, Railway volume takes over for the DB.
+# (Remove the lines below if you don't want to commit them — Railway will fetch fresh data on startup)

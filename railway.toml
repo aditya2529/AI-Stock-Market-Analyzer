@@ -1,0 +1,23 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "uvicorn api.app:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/api/health"
+healthcheckTimeout = 60
+restartPolicyType = "on_failure"
+
+[[services]]
+name = "dashboard"
+
+[[cronjobs]]
+name    = "paper-eod"
+command = "python main.py paper --once"
+# 10:05 UTC = 15:35 IST (Mon–Fri after NSE close)
+schedule = "5 10 * * 1-5"
+
+[[cronjobs]]
+name     = "monthly-retrain"
+command  = "python main.py fetch --market nse --years 10 && python main.py fetch --symbol ^NSEI,^INDIAVIX --years 10 && python main.py train --all"
+# 1st of month at 01:30 UTC = 07:00 IST
+schedule = "30 1 1 * *"

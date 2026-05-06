@@ -1,0 +1,205 @@
+"""Feature engineering: raw OHLCV → 19-column ML-ready DataFrame.
+
+Features produced (no lookahead bias — all computed from past bars only):
+    rsi, macd, macd_signal, macd_hist,
+    bb_upper, bb_lower, bb_mid,
+    atr, vwap, obv, adx,
+    return_5, return_10, return_20,
+    volatility_10, volatility_20,
+    hour_of_day, day_of_week, minutes_to_close
+"""
+
+import pandas as pd
+import numpy as np
+
+
+# ── Low-level helpers ──────────────────────────────────────────────────────────
+
+def _ema(series: pd.Series, period: int) -> pd.Series:
+    return series.ewm(span=period, adjust=False).mean()
+
+
+def _sma(series: pd.Series, period: int) -> pd.Series:
+    return series.rolling(window=period, min_periods=period).mean()
+
+
+def _true_range(df: pd.DataFrame) -> pd.Series:
+    hl = df["high"] - df["low"]
+    hc = (df["high"] - df["close"].shift(1)).abs()
+    lc = (df["low"] - df["close"].shift(1)).abs()
+    return pd.concat([hl, hc, lc], axis=1).max(axis=1)
+
+
+# ── Individual indicator functions ─────────────────────────────────────────────
+
+def compute_rsi(close: pd.Series, period: int = 14) -> pd.Series:
+    delta = close.diff()
+    gain = delta.clip(lower=0)
+    loss = (-delta).clip(lower=0)
+    avg_gain = gain.ewm(com=period - 1, adjust=False).mean()
+    avg_loss = loss.ewm(com=period - 1, adjust=False).mean()
+    rs = avg_gain / (avg_loss + 1e-9)
+    return 100 - (100 / (1 + rs))
+
+
+def compute_macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9):
+    fast_ema = _ema(close, fast)
+    slow_ema = _ema(close, slow)
+    macd_line = fast_ema - slow_ema
+    signal_line = _ema(macd_line, signal)
+    histogram = macd_line - signal_line
+    return macd_line, signal_line, histogram
+
+
+def compute_bollinger(close: pd.Series, period: int = 20, std_dev: float = 2.0):
+    mid = _sma(close, period)
+    std = close.rolling(window=period, min_periods=period).std()
+    upper = mid + std_dev * std
+    lower = mid - std_dev * std
+    return upper, lower, mid
+
+
+def compute_atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
+    tr = _true_range(df)
+    return tr.ewm(span=period, adjust=False).mean()
+
+
+def compute_vwap(df: pd.DataFrame) -> pd.Series:
+    """Cumulative VWAP from the start of the series (daily reset not applicable here)."""
+    typical = (df["high"] + df["low"] + df["close"]) / 3
+    cumvol = df["volume"].cumsum()
+    cumtpv = (typical * df["volume"]).cumsum()
+    return cumtpv / (cumvol + 1e-9)
+
+
+def compute_obv(df: pd.DataFrame) -> pd.Series:
+    direction = df["close"].diff().apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
+    return (direction * df["volume"]).cumsum()
+
+
+def compute_adx(df: pd.DataFrame, period: int = 14) -> pd.Series:
+    tr = _true_range(df)
+    up_move = df["high"].diff()
+    down_move = -df["low"].diff()
+
+    plus_dm = up_move.where((up_move > down_move) & (up_move > 0), 0.0)
+    minus_dm = down_move.where((down_move > up_move) & (down_move > 0), 0.0)
+
+    atr = tr.ewm(span=period, adjust=False).mean()
+    plus_di = 100 * (plus_dm.ewm(span=period, adjust=False).mean() / (atr + 1e-9))
+    minus_di = 100 * (minus_dm.ewm(span=period, adjust=False).mean() / (atr + 1e-9))
+
+    dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di + 1e-9))
+    return dx.ewm(span=period, adjust=False).mean()
+
+
+def compute_rolling_returns(close: pd.Series, periods=(5, 10, 20)) -> dict:
+    return {f"return_{p}": close.pct_change(p) for p in periods}
+
+
+def compute_rolling_volatility(close: pd.Series, periods=(10, 20)) -> dict:
+    log_ret = np.log(close / close.shift(1))
+    return {f"volatility_{p}": log_ret.rolling(window=p, min_periods=p).std() for p in periods}
+
+
+def compute_time_features(index: pd.DatetimeIndex) -> dict:
+    hour_of_day = index.hour + index.minute / 60.0
+    day_of_week = index.dayofweek  # 0=Mon … 4=Fri
+    # NSE closes at 15:30 IST. For daily bars this is just a constant.
+    close_hour, close_min = 15, 30
+    minutes_to_close = (close_hour * 60 + close_min) - (index.hour * 60 + index.minute)
+    minutes_to_close = np.clip(minutes_to_close.to_numpy(), 0, None)
+    return {
+        "hour_of_day": hour_of_day.to_numpy(),
+        "day_of_week": day_of_week.to_numpy(),
+        "minutes_to_close": minutes_to_close,
+    }
+
+
+# ── Main entry point ───────────────────────────────────────────────────────────
+
+def _load_macro_context() -> tuple[pd.Series, pd.Series]:
+    """Load Nifty 50 returns and India VIX from the local DB.
+
+    Returns two DatetimeIndex-aligned Series (forward-filled to daily).
+    Falls back to zeros if data is unavailable so feature pipeline never breaks.
+    """
+    try:
+        from data.database import load_ohlcv
+        nifty = load_ohlcv("^NSEI")["close"]
+        nifty_ret = nifty.pct_change().rename("nifty_return")
+        nifty_ma20 = (nifty / nifty.rolling(20).mean() - 1).rename("nifty_vs_ma20")
+        vix = load_ohlcv("^INDIAVIX")["close"].rename("india_vix")
+        vix_zscore = ((vix - vix.rolling(60).mean()) / (vix.rolling(60).std() + 1e-9)).rename("vix_zscore")
+        return nifty_ret, nifty_ma20, vix, vix_zscore
+    except Exception:
+        return None, None, None, None
+
+
+def engineer_features(df: pd.DataFrame, add_macro: bool = True) -> pd.DataFrame:
+    """Compute all features on an OHLCV DataFrame.
+
+    Args:
+        df:          DataFrame with DatetimeIndex and columns [open, high, low, close, volume].
+        add_macro:   If True, join Nifty 50 returns and India VIX as market context features.
+
+    Returns:
+        Original DataFrame with feature columns appended.
+        Rows with NaN features (warm-up period) are dropped.
+    """
+    out = df.copy()
+
+    # RSI
+    out["rsi"] = compute_rsi(out["close"])
+
+    # MACD
+    out["macd"], out["macd_signal"], out["macd_hist"] = compute_macd(out["close"])
+
+    # Bollinger Bands
+    out["bb_upper"], out["bb_lower"], out["bb_mid"] = compute_bollinger(out["close"])
+
+    # ATR
+    out["atr"] = compute_atr(out)
+
+    # VWAP
+    out["vwap"] = compute_vwap(out)
+
+    # OBV (normalised to units of 1M shares to keep scale reasonable)
+    out["obv"] = compute_obv(out) / 1e6
+
+    # ADX
+    out["adx"] = compute_adx(out)
+
+    # Rolling returns
+    for name, series in compute_rolling_returns(out["close"]).items():
+        out[name] = series
+
+    # Rolling volatility
+    for name, series in compute_rolling_volatility(out["close"]).items():
+        out[name] = series
+
+    # Time features
+    idx = out.index if isinstance(out.index, pd.DatetimeIndex) else pd.to_datetime(out.index)
+    for name, values in compute_time_features(idx).items():
+        out[name] = values
+
+    # Macro context: Nifty 50 + India VIX — tells model what the whole market is doing
+    macro_cols = []
+    if add_macro:
+        nifty_ret, nifty_ma20, vix, vix_zscore = _load_macro_context()
+        if nifty_ret is not None:
+            for series in [nifty_ret, nifty_ma20, vix, vix_zscore]:
+                out[series.name] = series.reindex(out.index, method="ffill")
+            macro_cols = ["nifty_return", "nifty_vs_ma20", "india_vix", "vix_zscore"]
+
+    # Drop warm-up rows that have NaN in any feature column
+    feature_cols = [
+        "rsi", "macd", "macd_signal", "macd_hist",
+        "bb_upper", "bb_lower", "bb_mid",
+        "atr", "vwap", "obv", "adx",
+        "return_5", "return_10", "return_20",
+        "volatility_10", "volatility_20",
+        "hour_of_day", "day_of_week", "minutes_to_close",
+    ] + macro_cols
+    out = out.dropna(subset=feature_cols)
+    return out
