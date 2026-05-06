@@ -22,12 +22,18 @@ logger = logging.getLogger(__name__)
 SIGNAL_MAP = {"BUY": 1, "HOLD": 0, "SELL": -1}
 
 
-def make_labels(df: pd.DataFrame) -> pd.Series:
+def make_labels(df: pd.DataFrame,
+                lookahead: int = None,
+                buy_threshold: float = None,
+                sell_threshold: float = None) -> pd.Series:
     """Create forward-return labels: BUY / SELL / HOLD."""
-    fwd_return = df["close"].shift(-LABEL_LOOKAHEAD) / df["close"] - 1
+    la  = lookahead      if lookahead      is not None else LABEL_LOOKAHEAD
+    bt  = buy_threshold  if buy_threshold  is not None else BUY_THRESHOLD
+    st  = sell_threshold if sell_threshold is not None else SELL_THRESHOLD
+    fwd_return = df["close"].shift(-la) / df["close"] - 1
     labels = pd.Series("HOLD", index=df.index)
-    labels[fwd_return >= BUY_THRESHOLD] = "BUY"
-    labels[fwd_return <= SELL_THRESHOLD] = "SELL"
+    labels[fwd_return >= bt] = "BUY"
+    labels[fwd_return <= st] = "SELL"
     return labels
 
 

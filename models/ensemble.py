@@ -46,12 +46,18 @@ class Ensemble:
         """Convert regime strings to (n, 3) soft probability array."""
         return np.array([_REGIME_PROBA.get(r, _REGIME_PROBA["UNKNOWN"]) for r in regimes])
 
-    def fit(self, df: pd.DataFrame) -> "Ensemble":
+    def fit(self, df: pd.DataFrame,
+            lookahead: int = None,
+            buy_threshold: float = None,
+            sell_threshold: float = None) -> "Ensemble":
         """Train all layers on df (must have feature columns + OHLCV).
 
         Uses first 80% for training, last 20% for meta-model calibration.
+        Lookahead/thresholds override config defaults (used for intraday mode).
         """
-        labels = make_labels(df)
+        labels = make_labels(df, lookahead=lookahead,
+                             buy_threshold=buy_threshold,
+                             sell_threshold=sell_threshold)
         valid = labels.notna()
         df_v = df[valid]
         labels_v = labels[valid]
@@ -104,14 +110,16 @@ class Ensemble:
             "regime": regimes.values,
         }, index=df.index)
 
-    def save(self, name: str = "ensemble.pkl"):
-        path = Path(MODELS_DIR) / name
+    def save(self, name: str = "ensemble.pkl", suffix: str = "") -> Path:
+        fname = name.replace(".pkl", f"{suffix}.pkl") if suffix else name
+        path = Path(MODELS_DIR) / fname
         with open(path, "wb") as f:
             pickle.dump(self, f)
         return path
 
     @classmethod
-    def load(cls, name: str = "ensemble.pkl") -> "Ensemble":
-        path = Path(MODELS_DIR) / name
+    def load(cls, name: str = "ensemble.pkl", suffix: str = "") -> "Ensemble":
+        fname = name.replace(".pkl", f"{suffix}.pkl") if suffix else name
+        path = Path(MODELS_DIR) / fname
         with open(path, "rb") as f:
             return pickle.load(f)

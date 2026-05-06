@@ -61,32 +61,59 @@ def cmd_features(args):
 
 
 def cmd_train(args):
-    from data.ingestion import get_ohlcv
+    from data.ingestion import get_ohlcv, fetch_and_store
     from data.database import list_symbols
     from features.engineer import engineer_features
     from models.ensemble import Ensemble
     import pandas as pd
 
-    # Train on all available symbols if --all flag set, else single symbol
-    symbols = list_symbols() if args.all else [args.symbol]
-    frames = []
-    for sym in symbols:
-        try:
-            df = get_ohlcv(sym, resolution=args.resolution)
-            feat = engineer_features(df)
-            feat["_symbol"] = sym  # tag for debugging, not used as feature
-            frames.append(feat)
-        except Exception as e:
-            print(f"  Skipping {sym}: {e}")
+    if args.intraday:
+        from data.universe import NIFTY_500_SYMBOLS
+        symbols = NIFTY_500_SYMBOLS[:60]
+        print(f"Intraday mode: fetching 5-min data for {len(symbols)} symbols …")
+        frames = []
+        for sym in symbols:
+            try:
+                df = fetch_and_store(sym, years=1, resolution="5m")
+                if len(df) < 100:
+                    continue
+                feat = engineer_features(df)
+                frames.append(feat)
+                print(f"  ✓ {sym}: {len(df)} bars")
+            except Exception as e:
+                print(f"  ✗ {sym}: {e}")
+    else:
+        symbols = list_symbols() if args.all else [args.symbol]
+        frames = []
+        for sym in symbols:
+            try:
+                df = get_ohlcv(sym, resolution=args.resolution)
+                feat = engineer_features(df)
+                feat["_symbol"] = sym
+                frames.append(feat)
+            except Exception as e:
+                print(f"  Skipping {sym}: {e}")
+
+    if not frames:
+        print("No data to train on.")
+        sys.exit(1)
 
     combined = pd.concat(frames, ignore_index=False)
-    # Drop symbol tag before passing to model
-    combined = combined.drop(columns=["_symbol"])
+    if "_symbol" in combined.columns:
+        combined = combined.drop(columns=["_symbol"])
     print(f"Training on {len(combined):,} bars across {len(frames)} symbol(s) …")
 
     ensemble = Ensemble()
-    ensemble.fit(combined)
-    path = ensemble.save()
+    if args.intraday:
+        from config import INTRADAY_LOOKAHEAD, INTRADAY_BUY_THRESHOLD, INTRADAY_SELL_THRESHOLD
+        ensemble.fit(combined,
+                     lookahead=INTRADAY_LOOKAHEAD,
+                     buy_threshold=INTRADAY_BUY_THRESHOLD,
+                     sell_threshold=INTRADAY_SELL_THRESHOLD)
+        path = ensemble.save(suffix="_intraday")
+    else:
+        ensemble.fit(combined)
+        path = ensemble.save()
     print(f"✓ Ensemble saved to {path}")
 
 
@@ -144,6 +171,32 @@ def cmd_backtest(args):
         out = pathlib.Path("backtest_report.json")
         out.write_text(json.dumps(results, indent=2))
         print(f"\n  Full report saved to {out}")
+
+
+def cmd_intraday(args):
+    from models.ensemble import Ensemble
+    from data.universe import get_morning_universe, NIFTY_500_SYMBOLS
+    from intraday.engine import run_intraday_session
+
+    try:
+        ensemble = Ensemble.load(suffix="_intraday")
+    except FileNotFoundError:
+        try:
+            print("No intraday model found — using swing model as fallback.")
+            ensemble = Ensemble.load()
+        except FileNotFoundError:
+            print("No trained model found. Run: python main.py train --intraday")
+            sys.exit(1)
+
+    if args.symbol:
+        symbols = [s.strip() for s in args.symbol.split(",")]
+        print(f"Using {len(symbols)} manually specified symbols.")
+    else:
+        print("Scanning universe — picking top 50 stocks for today …")
+        symbols = get_morning_universe(top_n=args.top_n)
+
+    print(f"Selected: {', '.join(symbols[:10])}{'…' if len(symbols)>10 else ''}\n")
+    run_intraday_session(symbols, ensemble, portfolio_value=args.portfolio)
 
 
 def cmd_review(args):
@@ -287,12 +340,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_train.add_argument("--symbol", default=DEFAULT_SYMBOLS[0])
     p_train.add_argument("--resolution", default="1d")
     p_train.add_argument("--all", action="store_true", help="Train on all stored symbols")
+    p_train.add_argument("--intraday", action="store_true", help="Train on 5-min bars for intraday trading")
 
     # backtest
     p_bt = sub.add_parser("backtest", help="Run walk-forward backtest")
     p_bt.add_argument("--symbol", default=DEFAULT_SYMBOLS[0])
     p_bt.add_argument("--resolution", default="1d")
     p_bt.add_argument("--save", action="store_true", help="Save JSON report")
+
+    # intraday
+    p_intra = sub.add_parser("intraday", help="Run intraday paper trading (9:15 AM – 3:15 PM IST)")
+    p_intra.add_argument("--symbol", default=None, help="Comma-separated symbols (default: morning scanner picks top 50)")
+    p_intra.add_argument("--top-n", type=int, default=50, help="How many stocks to pick from morning scan")
+    p_intra.add_argument("--portfolio", type=float, default=100_000.0)
 
     # review
     p_rev = sub.add_parser("review", help="Forward performance review — go/no-go for live trading")
@@ -333,6 +393,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     dispatch = {
+        "intraday": cmd_intraday,
         "fetch": cmd_fetch,
         "features": cmd_features,
         "train": cmd_train,

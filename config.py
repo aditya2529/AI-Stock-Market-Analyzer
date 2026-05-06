@@ -65,6 +65,16 @@ WF_STEP_MONTHS = 3
 BROKERAGE_PCT = 0.0003     # 0.03%
 SLIPPAGE_PCT = 0.001       # 0.10%
 
+# ── Intraday settings ──────────────────────────────────────────────────
+INTRADAY_RESOLUTION   = "5m"
+INTRADAY_LOOKAHEAD    = 6          # 6 bars × 5 min = 30 min forward return
+INTRADAY_BUY_THRESHOLD  = 0.003   # +0.3% in 30 min → BUY label
+INTRADAY_SELL_THRESHOLD = -0.003  # -0.3% in 30 min → SELL label
+INTRADAY_UNIVERSE_SIZE  = 50      # top N stocks picked each morning
+INTRADAY_SIGNAL_INTERVAL = 5      # minutes between signal checks
+INTRADAY_FORCE_CLOSE_TIME = (15, 15)  # 3:15 PM IST — close all before market end
+INTRADAY_MAX_POSITIONS = 5        # max open positions at one time (risk control)
+
 # Risk management
 MAX_RISK_PCT = 0.01        # 1% of portfolio per trade
 ATR_SL_MULTIPLIER = 1.0    # stop-loss = entry ± 1x ATR(14)

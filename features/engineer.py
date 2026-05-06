@@ -136,6 +136,49 @@ def _load_macro_context() -> tuple[pd.Series, pd.Series]:
         return None, None, None, None
 
 
+def compute_intraday_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Extra features that only make sense on intraday (5-min) bars."""
+    out = df.copy()
+
+    # Daily VWAP — reset each calendar day
+    out["date"] = out.index.date
+    out["vwap_intraday"] = (
+        out.groupby("date")
+        .apply(lambda g: (g["close"] * g["volume"]).cumsum() / (g["volume"].cumsum() + 1e-9))
+        .reset_index(level=0, drop=True)
+    )
+    out = out.drop(columns=["date"])
+
+    # Opening range (first 3 bars = first 15 min of the day)
+    def opening_range(g):
+        first3 = g.iloc[:3]
+        g["or_high"] = first3["high"].max()
+        g["or_low"]  = first3["low"].min()
+        return g
+    out["date2"] = out.index.date
+    out = out.groupby("date2", group_keys=False).apply(opening_range)
+    out = out.drop(columns=["date2"])
+
+    # Price vs opening range
+    out["above_or"] = (out["close"] > out["or_high"]).astype(float)
+    out["below_or"] = (out["close"] < out["or_low"]).astype(float)
+
+    # Volume surge: current bar volume vs 20-bar rolling average
+    out["volume_surge"] = out["volume"] / (out["volume"].rolling(20).mean() + 1e-9)
+
+    # Minutes since market open (9:15 IST)
+    market_open_minutes = 9 * 60 + 15
+    out["mins_since_open"] = (out.index.hour * 60 + out.index.minute) - market_open_minutes
+    out["mins_since_open"] = out["mins_since_open"].clip(lower=0)
+
+    # Minutes to force-close (3:15 PM)
+    force_close_minutes = 15 * 60 + 15
+    out["mins_to_close"] = force_close_minutes - (out.index.hour * 60 + out.index.minute)
+    out["mins_to_close"] = out["mins_to_close"].clip(lower=0)
+
+    return out
+
+
 def engineer_features(df: pd.DataFrame, add_macro: bool = True) -> pd.DataFrame:
     """Compute all features on an OHLCV DataFrame.
 
@@ -202,4 +245,11 @@ def engineer_features(df: pd.DataFrame, add_macro: bool = True) -> pd.DataFrame:
         "hour_of_day", "day_of_week", "minutes_to_close",
     ] + macro_cols
     out = out.dropna(subset=feature_cols)
+
+    # Add intraday-specific features if this is 5-min data
+    if isinstance(out.index, pd.DatetimeIndex) and len(out) > 20:
+        bars_per_day = out.groupby(out.index.date).size().median()
+        if bars_per_day > 10:   # more than 10 bars/day = intraday data
+            out = compute_intraday_features(out)
+
     return out
