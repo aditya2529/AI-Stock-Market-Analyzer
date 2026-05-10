@@ -1,4 +1,5 @@
 """Sequence Layer — 2-layer LSTM (PyTorch) for time-series pattern learning."""
+from __future__ import annotations
 import pickle
 import numpy as np
 import pandas as pd

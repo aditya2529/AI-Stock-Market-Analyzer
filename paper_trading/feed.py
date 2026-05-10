@@ -3,6 +3,7 @@
 Polls yfinance for the latest OHLCV bar for each symbol.
 NSE market hours: 09:15 – 15:30 IST (UTC+5:30).
 """
+from __future__ import annotations
 import logging
 import time
 from datetime import datetime, timezone, timedelta
@@ -53,7 +54,10 @@ def fetch_latest_bar(symbol: str, resolution: str = "1d") -> Optional[pd.Series]
         if df.empty:
             logger.warning("No data returned for %s", symbol)
             return None
-        df.columns = [c.lower() for c in df.columns]
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = [c[0].lower() for c in df.columns]
+        else:
+            df.columns = [c.lower() for c in df.columns]
         bar = df.iloc[-1]
         bar.name = df.index[-1]
         return bar

@@ -1,5 +1,17 @@
 # Secrets — never commit
 .env
+*.key
+*.pem
+*.pub
+ssh-key*
+deploy_*.sh
+
+# Claude local config
+.claude/launch.json
+.claude/scheduled_tasks.lock
+
+# Preview files
+dashboard/light_preview.html
 
 # Logs and reports
 logs/

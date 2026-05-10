@@ -86,12 +86,26 @@ class Ensemble:
         logger.info("Ensemble training complete.")
         return self
 
+    def _meta_predict(self, layer_probas):
+        """Call meta_model with sklearn version compatibility fix."""
+        mm = self.meta_model
+        if not hasattr(mm.model, "multi_class"):
+            mm.model.multi_class = "auto"
+        return mm.predict(layer_probas)
+
+    def _meta_predict_proba(self, layer_probas):
+        """Call meta_model.predict_proba with sklearn version compatibility fix."""
+        mm = self.meta_model
+        if not hasattr(mm.model, "multi_class"):
+            mm.model.multi_class = "auto"
+        return mm.predict_proba(layer_probas)
+
     def predict(self, df: pd.DataFrame) -> pd.Series:
         """Return Series of BUY/HOLD/SELL signals aligned to df's index."""
         sig_proba = self.signal_layer.predict_proba(df)
         seq_proba = self.sequence_layer.predict_proba(df)
         reg_proba = self._regime_to_proba(self.regime_layer.predict_regimes(df))
-        preds = self.meta_model.predict([sig_proba, seq_proba, reg_proba])
+        preds = self._meta_predict([sig_proba, seq_proba, reg_proba])
         return pd.Series(preds, index=df.index, name="signal")
 
     def predict_with_confidence(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -100,8 +114,8 @@ class Ensemble:
         seq_proba = self.sequence_layer.predict_proba(df)
         regimes = self.regime_layer.predict_regimes(df)
         reg_proba = self._regime_to_proba(regimes)
-        meta_proba = self.meta_model.predict_proba([sig_proba, seq_proba, reg_proba])
-        labels = self.meta_model.predict([sig_proba, seq_proba, reg_proba])
+        meta_proba = self._meta_predict_proba([sig_proba, seq_proba, reg_proba])
+        labels = self._meta_predict([sig_proba, seq_proba, reg_proba])
 
         confidence = meta_proba.max(axis=1)
         return pd.DataFrame({

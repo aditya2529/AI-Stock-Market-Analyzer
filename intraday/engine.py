@@ -8,12 +8,14 @@ Flow each tick:
     5. At 3:15 PM: force-close all open positions
     6. Send Telegram alert on every BUY/SELL/close event
 """
+from __future__ import annotations
 import logging
 import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from config import (
     INTRADAY_RESOLUTION, INTRADAY_SIGNAL_INTERVAL,
@@ -22,6 +24,9 @@ from config import (
 
 logger = logging.getLogger(__name__)
 IST = ZoneInfo("Asia/Kolkata")
+
+# Fix 2: Per-symbol stop-loss cooldown — reset each session
+_sl_cooldown: set = set()   # symbols blocked for re-entry today after SL hit
 
 
 def _ist_now() -> datetime:
@@ -59,7 +64,10 @@ def _fetch_intraday(symbol: str) -> pd.DataFrame | None:
                          progress=False, auto_adjust=True)
         if df.empty:
             return None
-        df.columns = [c.lower() for c in df.columns]
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = [c[0].lower() for c in df.columns]
+        else:
+            df.columns = [c.lower() for c in df.columns]
         df.index = pd.to_datetime(df.index).tz_localize(None) \
             if df.index.tz is None else pd.to_datetime(df.index).tz_convert("Asia/Kolkata").tz_localize(None)
         return df
@@ -95,6 +103,10 @@ def _process_symbol(symbol: str, ensemble, portfolio_value: float) -> dict | Non
     if pos:
         result = try_close(symbol, current_price, "HOLD")
         if result:
+            # Fix 2: add to cooldown if exit was stop-loss
+            if result.get("exit_reason") == "stop_loss":
+                _sl_cooldown.add(symbol)
+                logger.info("SL cooldown: %s blocked for rest of session", symbol)
             from alerts.dispatcher import on_trade_closed
             on_trade_closed(result)
             return result
@@ -124,6 +136,10 @@ def _process_symbol(symbol: str, ensemble, portfolio_value: float) -> dict | Non
         return result
 
     if signal == "BUY" and pos is None:
+        # Fix 2: block re-entry if symbol hit SL earlier today
+        if symbol in _sl_cooldown:
+            logger.debug("SL cooldown active — skipping BUY for %s", symbol)
+            return None
         from paper_trading.portfolio import get_open_positions
         if len(get_open_positions()) >= INTRADAY_MAX_POSITIONS:
             logger.debug("%s: max positions reached, skipping BUY", symbol)
@@ -179,6 +195,7 @@ def run_intraday_session(symbols: list[str], ensemble, portfolio_value: float = 
     from paper_trading.portfolio import init_paper_tables, get_config, set_cash, set_config, snapshot_portfolio
     from alerts.dispatcher import on_portfolio_snapshot
 
+    _sl_cooldown.clear()   # Fix 2: fresh cooldown each session
     init_paper_tables()
     if get_config("cash") is None:
         set_cash(portfolio_value)
@@ -210,16 +227,20 @@ def run_intraday_session(symbols: list[str], ensemble, portfolio_value: float = 
             time.sleep(900)   # sleep 15 min then exit
             break
 
-        # Process every symbol
+        # Fix 3: parallel signal scanning — 8 workers, preserves architecture
         actions = 0
         prices = {}
-        for sym in symbols:
-            try:
-                result = _process_symbol(sym, ensemble, portfolio_value)
-                if result:
-                    actions += 1
-            except Exception as e:
-                logger.error("%s: %s", sym, e)
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            futures = {ex.submit(_process_symbol, sym, ensemble, portfolio_value): sym
+                       for sym in symbols}
+            for fut in as_completed(futures):
+                sym = futures[fut]
+                try:
+                    result = fut.result(timeout=30)
+                    if result:
+                        actions += 1
+                except Exception as e:
+                    logger.error("%s: %s", sym, e)
 
         # Portfolio snapshot every tick
         state = snapshot_portfolio(prices)

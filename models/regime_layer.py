@@ -1,4 +1,5 @@
 """Regime Layer — Hidden Markov Model for market condition detection."""
+from __future__ import annotations
 import pickle
 import numpy as np
 import pandas as pd

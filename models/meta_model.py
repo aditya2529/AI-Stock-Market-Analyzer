@@ -1,4 +1,5 @@
 """Meta Model — Logistic Regression that calibrates ensemble outputs."""
+from __future__ import annotations
 import pickle
 import numpy as np
 import pandas as pd
@@ -8,6 +9,12 @@ from sklearn.preprocessing import LabelEncoder
 from config import RANDOM_STATE, MODELS_DIR
 
 _LABEL_ORDER = ["BUY", "HOLD", "SELL"]
+
+# Older saved sklearn models may be missing this attribute when loaded under a
+# newer sklearn runtime. Add a class-level fallback so predict_proba can still
+# resolve it even before an instance-level compatibility patch runs.
+if not hasattr(LogisticRegression, "multi_class"):
+    LogisticRegression.multi_class = "auto"
 
 
 class MetaModel:
@@ -30,12 +37,19 @@ class MetaModel:
         self.model.fit(X_meta, y_enc)
         return self
 
+    def _fix_compat(self):
+        """Patch sklearn version mismatch — add missing 'multi_class' attribute."""
+        if not hasattr(self.model, "multi_class"):
+            self.model.multi_class = "auto"
+
     def predict(self, layer_probas: list[np.ndarray]) -> np.ndarray:
+        self._fix_compat()
         X_meta = np.hstack(layer_probas)
         y_enc = self.model.predict(X_meta)
         return self.encoder.inverse_transform(y_enc)
 
     def predict_proba(self, layer_probas: list[np.ndarray]) -> np.ndarray:
+        self._fix_compat()
         X_meta = np.hstack(layer_probas)
         return self.model.predict_proba(X_meta)
 
