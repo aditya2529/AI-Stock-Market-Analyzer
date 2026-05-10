@@ -1,4 +1,5 @@
 """Signal Generator — produces the full JSON signal payload with SHAP explainability."""
+from __future__ import annotations
 import time
 import logging
 import json

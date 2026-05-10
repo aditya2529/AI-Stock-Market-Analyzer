@@ -1,4 +1,5 @@
 """Risk Management Engine — position sizing, stop-loss, target calculation."""
+from __future__ import annotations
 import pandas as pd
 from config import (
     MAX_RISK_PCT, ATR_SL_MULTIPLIER, ATR_TARGET_MULTIPLIER, DAILY_LOSS_LIMIT_PCT

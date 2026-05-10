@@ -1,4 +1,5 @@
 """Paper trading engine — orchestrates feed → signal → execution → portfolio update."""
+from __future__ import annotations
 import logging
 import time
 from typing import Optional

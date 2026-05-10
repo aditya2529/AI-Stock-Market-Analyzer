@@ -8,7 +8,7 @@ Features produced (no lookahead bias — all computed from past bars only):
     volatility_10, volatility_20,
     hour_of_day, day_of_week, minutes_to_close
 """
-
+from __future__ import annotations
 import pandas as pd
 import numpy as np
 

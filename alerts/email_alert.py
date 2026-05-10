@@ -1,4 +1,5 @@
 """Email alert sender via SMTP (Gmail by default, any STARTTLS host works)."""
+from __future__ import annotations
 import logging
 import smtplib
 from email.mime.multipart import MIMEMultipart

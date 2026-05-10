@@ -6,6 +6,7 @@ Flow:
     3. Simulate trades on test predictions (long-only, daily bars).
     4. Aggregate metrics across all folds.
 """
+from __future__ import annotations
 import logging
 from dateutil.relativedelta import relativedelta
 import pandas as pd

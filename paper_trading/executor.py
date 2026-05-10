@@ -4,6 +4,7 @@ Fills are applied at the open of the bar AFTER the signal bar (T+1 open),
 matching a realistic live setup where signals are generated after market close
 and orders are placed before next day's open.
 """
+from __future__ import annotations
 import logging
 from typing import Optional
 
