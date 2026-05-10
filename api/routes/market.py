@@ -1,7 +1,127 @@
 """Market data and regime endpoints."""
+from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
+import time
 
 router = APIRouter(prefix="/api/market", tags=["market"])
+
+# Simple in-process cache — refresh every 60s
+_indices_cache: dict = {}
+_indices_ts: float = 0.0
+
+# US stocks snapshot cache
+_us_stocks_cache: list = []
+_us_stocks_ts: float = 0.0
+
+INDICES = {
+    "NIFTY 50":   "^NSEI",
+    "SENSEX":     "^BSESN",
+    "BANK NIFTY": "^NSEBANK",
+    "NIFTY IT":   "^CNXIT",
+    "INDIA VIX":  "^INDIAVIX",
+    "S&P 500":    "^GSPC",
+    "NASDAQ":     "^IXIC",
+    "DOW JONES":  "^DJI",
+}
+
+@router.get("/indices")
+def get_indices():
+    """Live index quotes — cached 60s to avoid hammering yfinance."""
+    global _indices_cache, _indices_ts
+    if time.time() - _indices_ts < 60 and _indices_cache:
+        return _indices_cache
+
+    import yfinance as yf
+    tickers = list(INDICES.values())
+    try:
+        data = yf.download(tickers, period="2d", interval="1d",
+                           progress=False, auto_adjust=True, group_by="ticker")
+        result = []
+        for name, sym in INDICES.items():
+            try:
+                if isinstance(data.columns, __import__('pandas').MultiIndex):
+                    df = data[sym].dropna()
+                else:
+                    df = data.dropna()
+                if len(df) < 2:
+                    continue
+                curr  = float(df["Close"].iloc[-1])
+                prev  = float(df["Close"].iloc[-2])
+                chg   = curr - prev
+                chgPct = chg / prev
+                result.append({
+                    "name": name, "symbol": sym,
+                    "price": round(curr, 2),
+                    "change": round(chg, 2),
+                    "change_pct": round(chgPct, 4),
+                })
+            except Exception:
+                continue
+        _indices_cache = result
+        _indices_ts = time.time()
+        return result
+    except Exception as e:
+        return _indices_cache or []
+
+
+@router.get("/us/stocks")
+def get_us_stocks():
+    """Live US stock quotes via Alpaca IEX feed — cached 60s."""
+    global _us_stocks_cache, _us_stocks_ts
+    if time.time() - _us_stocks_ts < 60 and _us_stocks_cache:
+        return _us_stocks_cache
+
+    from config import DEFAULT_US_SYMBOLS, ALPACA_API_KEY, ALPACA_API_SECRET, ALPACA_BASE_URL
+    if not (ALPACA_API_KEY and ALPACA_API_SECRET):
+        return []
+
+    import urllib.request, urllib.parse, json as _json
+    symbols_str = ",".join(DEFAULT_US_SYMBOLS)
+    url = f"https://data.alpaca.markets/v2/stocks/bars/latest?symbols={urllib.parse.quote(symbols_str)}&feed=iex"
+    req = urllib.request.Request(url, headers={
+        "APCA-API-KEY-ID": ALPACA_API_KEY,
+        "APCA-API-SECRET-KEY": ALPACA_API_SECRET,
+        "Accept": "application/json",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = _json.loads(resp.read().decode())
+        bars = data.get("bars", {})
+
+        # Also fetch previous close for change %
+        url2 = (f"https://data.alpaca.markets/v2/stocks/bars?"
+                f"symbols={urllib.parse.quote(symbols_str)}&timeframe=1Day&limit=2&feed=iex"
+                f"&sort=desc&adjustment=split")
+        req2 = urllib.request.Request(url2, headers={
+            "APCA-API-KEY-ID": ALPACA_API_KEY,
+            "APCA-API-SECRET-KEY": ALPACA_API_SECRET,
+            "Accept": "application/json",
+        })
+        with urllib.request.urlopen(req2, timeout=10) as resp2:
+            daily = _json.loads(resp2.read().decode())
+        daily_bars = daily.get("bars", {})
+
+        result = []
+        for sym in DEFAULT_US_SYMBOLS:
+            bar = bars.get(sym)
+            if not bar:
+                continue
+            curr = float(bar.get("c", 0))
+            prev_bars = daily_bars.get(sym, [])
+            prev = float(prev_bars[1]["c"]) if len(prev_bars) >= 2 else curr
+            chg = curr - prev
+            chg_pct = chg / prev if prev else 0
+            result.append({
+                "symbol": sym,
+                "price": round(curr, 2),
+                "change": round(chg, 2),
+                "change_pct": round(chg_pct, 4),
+            })
+        _us_stocks_cache = result
+        _us_stocks_ts = time.time()
+        return result
+    except Exception as e:
+        return _us_stocks_cache or []
 
 
 @router.get("/symbols")

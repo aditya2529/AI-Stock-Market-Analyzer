@@ -97,3 +97,42 @@ class AlpacaAdapter(DataAdapter):
         df = df.reset_index(drop=True)
         logger.info("Alpaca: fetched %d bars for %s (%s)", len(df), symbol, resolution)
         return df
+
+    def fetch_recent_bars(self, symbol: str, n_bars: int = 200,
+                          resolution: str = "5m") -> "pd.DataFrame":
+        """Fetch the most recent N bars — used by the intraday engine each tick."""
+        if not self.is_available():
+            raise RuntimeError("Alpaca API credentials not set.")
+
+        tf = _RESOLUTION_MAP.get(resolution)
+        if tf is None:
+            raise ValueError(f"Unsupported resolution for Alpaca: {resolution}")
+
+        end = datetime.now(timezone.utc)
+        # Go back far enough to guarantee n_bars (markets closed on weekends)
+        start = end - timedelta(days=7)
+
+        params = {
+            "timeframe": tf,
+            "start": start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "end":   end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "limit": n_bars,
+            "adjustment": "split",
+            "feed": "iex",
+            "sort": "asc",
+        }
+
+        data = self._get(f"/stocks/{symbol}/bars", params)
+        bars = data.get("bars", [])
+        if not bars:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(bars)
+        df = df.rename(columns={
+            "t": "time", "o": "open", "h": "high",
+            "l": "low",  "c": "close", "v": "volume",
+        })
+        df["time"] = pd.to_datetime(df["time"], utc=True).dt.tz_localize(None)
+        df = df[["time", "open", "high", "low", "close", "volume"]].sort_values("time")
+        df = df.set_index("time")
+        return df.tail(n_bars)

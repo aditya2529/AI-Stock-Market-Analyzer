@@ -175,6 +175,31 @@ def cmd_backtest(args):
 
 def cmd_intraday(args):
     from models.ensemble import Ensemble
+
+    # ── US / NYSE session ────────────────────────────────────────────────
+    if getattr(args, "us", False):
+        from intraday.us_engine import run_us_session
+        from config import DEFAULT_US_SYMBOLS
+
+        try:
+            ensemble = Ensemble.load(suffix="_intraday")
+        except FileNotFoundError:
+            try:
+                print("No intraday model — using swing model as fallback.")
+                ensemble = Ensemble.load()
+            except FileNotFoundError:
+                print("No trained model found. Run: python main.py train --all")
+                sys.exit(1)
+
+        symbols = (
+            [s.strip() for s in args.symbol.split(",")]
+            if args.symbol else DEFAULT_US_SYMBOLS
+        )
+        print(f"NYSE/NASDAQ session | {len(symbols)} symbols | portfolio=${args.portfolio:,.0f}")
+        run_us_session(symbols=symbols, ensemble=ensemble, portfolio_value=args.portfolio)
+        return
+
+    # ── NSE / IST session (default) ──────────────────────────────────────
     from data.universe import get_morning_universe, NIFTY_500_SYMBOLS
     from intraday.engine import run_intraday_session
 
@@ -349,10 +374,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_bt.add_argument("--save", action="store_true", help="Save JSON report")
 
     # intraday
-    p_intra = sub.add_parser("intraday", help="Run intraday paper trading (9:15 AM – 3:15 PM IST)")
-    p_intra.add_argument("--symbol", default=None, help="Comma-separated symbols (default: morning scanner picks top 50)")
-    p_intra.add_argument("--top-n", type=int, default=50, help="How many stocks to pick from morning scan")
+    p_intra = sub.add_parser("intraday", help="Run intraday paper trading (NSE 9:15 AM IST | NYSE 9:30 AM ET)")
+    p_intra.add_argument("--symbol", default=None, help="Comma-separated symbols (default: morning scanner / DEFAULT_US_SYMBOLS)")
+    p_intra.add_argument("--top-n", type=int, default=50, help="NSE only: how many stocks to pick from morning scan")
     p_intra.add_argument("--portfolio", type=float, default=100_000.0)
+    p_intra.add_argument("--us", action="store_true",
+                         help="Run NYSE/NASDAQ session (9:30 AM – 3:50 PM ET) via Alpaca")
 
     # review
     p_rev = sub.add_parser("review", help="Forward performance review — go/no-go for live trading")
