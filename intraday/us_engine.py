@@ -90,9 +90,21 @@ def _fetch_us_intraday(symbol: str) -> pd.DataFrame | None:
             return None
         # Flatten MultiIndex columns (yfinance returns them for single-symbol downloads too)
         if isinstance(df.columns, pd.MultiIndex):
-            df.columns = [c[0].lower() for c in df.columns]
+            # yfinance ≥0.2.50 uses (Ticker, Price) ordering; older uses (Price, Ticker).
+            # Detect by checking whether level-0 values look like OHLCV names.
+            level0 = set(df.columns.get_level_values(0).str.upper())
+            ohlcv = {"OPEN", "HIGH", "LOW", "CLOSE", "VOLUME"}
+            if ohlcv.issubset(level0):
+                df.columns = [c[0].lower() for c in df.columns]   # (Price, Ticker)
+            else:
+                df.columns = [c[1].lower() for c in df.columns]   # (Ticker, Price)
         else:
             df.columns = [c.lower() for c in df.columns]
+
+        # Keep only standard OHLCV — drop dividends, splits, etc. and deduplicate
+        keep = [c for c in ["open", "high", "low", "close", "volume"] if c in df.columns]
+        df = df[keep]
+
         # Strip timezone — keep naive datetime (ET already embedded in values)
         df.index = pd.to_datetime(df.index).tz_localize(None) \
             if df.index.tz is None \
