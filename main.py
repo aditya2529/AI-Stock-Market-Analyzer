@@ -62,7 +62,7 @@ def cmd_features(args):
 
 def cmd_train(args):
     from data.ingestion import get_ohlcv, fetch_and_store
-    from data.database import list_symbols
+    from data.database import list_tradeable_symbols
     from features.engineer import engineer_features
     from models.ensemble import Ensemble
     import pandas as pd
@@ -83,7 +83,7 @@ def cmd_train(args):
             except Exception as e:
                 print(f"  ✗ {sym}: {e}")
     else:
-        symbols = list_symbols() if args.all else [args.symbol]
+        symbols = list_tradeable_symbols(resolution=args.resolution) if args.all else [args.symbol]
         frames = []
         for sym in symbols:
             try:

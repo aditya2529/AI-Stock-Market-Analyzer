@@ -68,3 +68,14 @@ def list_symbols() -> list[str]:
     with get_connection() as conn:
         rows = conn.execute("SELECT DISTINCT symbol FROM ohlcv ORDER BY symbol").fetchall()
     return [r[0] for r in rows]
+
+
+def list_tradeable_symbols(resolution: str = "1d") -> list[str]:
+    """Return tradeable symbols only — excludes macro indices (^NSEI, ^INDIAVIX, etc.)
+    and filters by resolution so macro-only rows don't bleed in."""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT symbol FROM ohlcv WHERE resolution = ? ORDER BY symbol",
+            (resolution,),
+        ).fetchall()
+    return [r[0] for r in rows if not r[0].startswith("^")]
