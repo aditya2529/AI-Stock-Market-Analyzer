@@ -22,13 +22,17 @@ class YFinanceAdapter(DataAdapter):
 
     def fetch_ohlcv(self, symbol: str, years: int = 3, resolution: str = "1d") -> pd.DataFrame:
         interval = _RESOLUTION_MAP.get(resolution, "1d")
-        end = datetime.utcnow()
-        max_days = _MAX_DAYS.get(interval, 99999)
-        delta_days = min(years * 365, max_days)
-        start = end - timedelta(days=delta_days)
-
         ticker = yf.Ticker(symbol)
-        raw = ticker.history(start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"), interval=interval)
+
+        # For 5-min data use period= (not start/end) to avoid yfinance 60-day boundary errors
+        if interval == "5m":
+            raw = ticker.history(period="58d", interval=interval)
+        else:
+            end = datetime.utcnow()
+            max_days = _MAX_DAYS.get(interval, 99999)
+            delta_days = min(years * 365, max_days)
+            start = end - timedelta(days=delta_days)
+            raw = ticker.history(start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"), interval=interval)
 
         if raw.empty:
             raise ValueError(f"yfinance returned no data for {symbol!r} ({interval})")

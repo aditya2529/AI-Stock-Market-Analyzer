@@ -192,6 +192,11 @@ def engineer_features(df: pd.DataFrame, add_macro: bool = True) -> pd.DataFrame:
     """
     out = df.copy()
 
+    # Ensure DatetimeIndex — fetch_and_store returns RangeIndex with 'time' as column
+    if "time" in out.columns and not isinstance(out.index, pd.DatetimeIndex):
+        out = out.set_index("time")
+    out.index = pd.to_datetime(out.index)
+
     # RSI
     out["rsi"] = compute_rsi(out["close"])
 

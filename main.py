@@ -68,8 +68,8 @@ def cmd_train(args):
     import pandas as pd
 
     if args.intraday:
-        from data.universe import NIFTY_500_SYMBOLS
-        symbols = NIFTY_500_SYMBOLS[:60]
+        from config import DEFAULT_SYMBOLS
+        symbols = DEFAULT_SYMBOLS  # Core 25 NSE symbols — confirmed to have 5-min data on yfinance
         print(f"Intraday mode: fetching 5-min data for {len(symbols)} symbols …")
         frames = []
         for sym in symbols:
