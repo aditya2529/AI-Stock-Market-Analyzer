@@ -103,6 +103,10 @@ def cmd_train(args):
         combined = combined.drop(columns=["_symbol"])
     print(f"Training on {len(combined):,} bars across {len(frames)} symbol(s) …")
 
+    # Use last 200 bars of combined data for post-train validation
+    validate_df = combined.iloc[-200:] if len(combined) >= 200 else combined
+    validate_sym = symbols[0] if symbols else "validation"
+
     ensemble = Ensemble()
     if args.intraday:
         from config import INTRADAY_LOOKAHEAD, INTRADAY_BUY_THRESHOLD, INTRADAY_SELL_THRESHOLD
@@ -110,10 +114,21 @@ def cmd_train(args):
                      lookahead=INTRADAY_LOOKAHEAD,
                      buy_threshold=INTRADAY_BUY_THRESHOLD,
                      sell_threshold=INTRADAY_SELL_THRESHOLD)
-        path = ensemble.save(suffix="_intraday")
+        try:
+            path = ensemble.save(suffix="_intraday",
+                                 validate_df=validate_df,
+                                 validate_symbol=validate_sym)
+        except RuntimeError as e:
+            print(f"\n✗ VALIDATION FAILED — old model kept safe.\n{e}")
+            sys.exit(1)
     else:
         ensemble.fit(combined)
-        path = ensemble.save()
+        try:
+            path = ensemble.save(validate_df=validate_df,
+                                 validate_symbol=validate_sym)
+        except RuntimeError as e:
+            print(f"\n✗ VALIDATION FAILED — old model kept safe.\n{e}")
+            sys.exit(1)
     print(f"✓ Ensemble saved to {path}")
 
 

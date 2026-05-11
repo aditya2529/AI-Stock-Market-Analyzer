@@ -124,9 +124,69 @@ class Ensemble:
             "regime": regimes.values,
         }, index=df.index)
 
-    def save(self, name: str = "ensemble.pkl", suffix: str = "") -> Path:
+    def validate(self, df: pd.DataFrame, symbol: str = "VALIDATION") -> dict:
+        """Run a quick sanity check on the last bar of df.
+
+        Returns a dict with 'ok' (bool) and 'errors' (list of str).
+        Checks: signal ∈ {BUY, HOLD, SELL}, confidence ∈ [0,1], price > 0.
+        """
+        errors = []
+        try:
+            result = self.predict_with_confidence(df.iloc[[-1]])
+            row = result.iloc[0]
+            signal = row["signal"]
+            confidence = float(row["confidence"])
+            # Price check — last close from raw df
+            price = float(df["close"].iloc[-1]) if "close" in df.columns else -1
+
+            if signal not in {"BUY", "HOLD", "SELL"}:
+                errors.append(f"invalid signal '{signal}'")
+            if not (0.0 <= confidence <= 1.0):
+                errors.append(f"confidence out of range: {confidence:.4f}")
+            if price <= 0:
+                errors.append(f"non-positive price: {price}")
+            if not (0.0 < confidence < 1.0) and signal != "HOLD":
+                # degenerate: confidence exactly 0 or 1 is suspicious for non-HOLD
+                errors.append(f"degenerate confidence={confidence:.4f} for signal={signal}")
+        except Exception as e:
+            errors.append(f"predict failed: {e}")
+
+        ok = len(errors) == 0
+        logger.info("Validation %s for %s — %s",
+                    "PASSED" if ok else "FAILED", symbol,
+                    "all checks OK" if ok else "; ".join(errors))
+        return {"ok": ok, "errors": errors}
+
+    def save(self, name: str = "ensemble.pkl", suffix: str = "",
+             validate_df: pd.DataFrame = None, validate_symbol: str = "VALIDATION") -> Path:
+        """Save ensemble to disk.
+
+        If validate_df is provided:
+          1. Run validate() first.
+          2. If validation fails → raise RuntimeError (old model NOT overwritten).
+          3. If validation passes → backup the existing file, then save.
+        """
         fname = name.replace(".pkl", f"{suffix}.pkl") if suffix else name
         path = Path(MODELS_DIR) / fname
+
+        if validate_df is not None:
+            result = self.validate(validate_df, symbol=validate_symbol)
+            if not result["ok"]:
+                raise RuntimeError(
+                    f"Ensemble validation FAILED — NOT saving to {path}.\n"
+                    f"Errors: {'; '.join(result['errors'])}\n"
+                    f"Existing model is untouched."
+                )
+
+        # Auto-backup existing model before overwriting
+        if path.exists():
+            from datetime import date
+            backup_name = fname.replace(".pkl", f"_backup_{date.today().strftime('%Y%m%d')}.pkl")
+            backup_path = Path(MODELS_DIR) / backup_name
+            import shutil
+            shutil.copy2(path, backup_path)
+            logger.info("Backed up existing model → %s", backup_path.name)
+
         with open(path, "wb") as f:
             pickle.dump(self, f)
         return path
