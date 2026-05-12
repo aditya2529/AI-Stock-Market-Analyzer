@@ -88,18 +88,17 @@ def get_us_stocks():
             data = _json.loads(resp.read().decode())
         bars = data.get("bars", {})
 
-        # Also fetch previous close for change %
-        url2 = (f"https://data.alpaca.markets/v2/stocks/bars?"
-                f"symbols={urllib.parse.quote(symbols_str)}&timeframe=1Day&limit=2&feed=iex"
-                f"&sort=desc&adjustment=split")
-        req2 = urllib.request.Request(url2, headers={
-            "APCA-API-KEY-ID": ALPACA_API_KEY,
-            "APCA-API-SECRET-KEY": ALPACA_API_SECRET,
-            "Accept": "application/json",
-        })
-        with urllib.request.urlopen(req2, timeout=10) as resp2:
-            daily = _json.loads(resp2.read().decode())
-        daily_bars = daily.get("bars", {})
+        # Previous close — Alpaca's batch bars endpoint is unreliable (drops symbols
+        # silently in batch responses), so use yfinance per-symbol which works reliably.
+        import yfinance as yf
+        prev_closes = {}
+        for sym in DEFAULT_US_SYMBOLS:
+            try:
+                hist = yf.Ticker(sym).history(period="5d", interval="1d", auto_adjust=False)
+                if len(hist) >= 2:
+                    prev_closes[sym] = float(hist["Close"].iloc[-2])
+            except Exception:
+                pass
 
         result = []
         for sym in DEFAULT_US_SYMBOLS:
@@ -107,8 +106,7 @@ def get_us_stocks():
             if not bar:
                 continue
             curr = float(bar.get("c", 0))
-            prev_bars = daily_bars.get(sym, [])
-            prev = float(prev_bars[1]["c"]) if len(prev_bars) >= 2 else curr
+            prev = prev_closes.get(sym, curr)
             chg = curr - prev
             chg_pct = chg / prev if prev else 0
             result.append({

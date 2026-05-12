@@ -144,7 +144,8 @@ def compute_intraday_features(df: pd.DataFrame) -> pd.DataFrame:
     out["date"] = out.index.date
     out["vwap_intraday"] = (
         out.groupby("date")
-        .apply(lambda g: (g["close"] * g["volume"]).cumsum() / (g["volume"].cumsum() + 1e-9))
+        .apply(lambda g: (g["close"] * g["volume"]).cumsum() / (g["volume"].cumsum() + 1e-9),
+               include_groups=False)
         .reset_index(level=0, drop=True)
     )
     out = out.drop(columns=["date"])
@@ -152,11 +153,15 @@ def compute_intraday_features(df: pd.DataFrame) -> pd.DataFrame:
     # Opening range (first 3 bars = first 15 min of the day)
     def opening_range(g):
         first3 = g.iloc[:3]
+        g = g.copy()
         g["or_high"] = first3["high"].max()
         g["or_low"]  = first3["low"].min()
         return g
     out["date2"] = out.index.date
-    out = out.groupby("date2", group_keys=False).apply(opening_range)
+    out = out.groupby("date2", group_keys=False).apply(opening_range, include_groups=False)
+    # groupby drops the key col when include_groups=False — restore it from index
+    if "date2" not in out.columns:
+        out["date2"] = out.index.date
     out = out.drop(columns=["date2"])
 
     # Price vs opening range

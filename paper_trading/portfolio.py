@@ -81,12 +81,29 @@ def set_config(key: str, value):
         )
 
 
+def _market_of(symbol: str) -> str:
+    return "nse" if symbol.endswith(".NS") else "nyse"
+
+
 def get_cash() -> float:
-    return float(get_config("cash", get_config("initial_cash", "100000")))
+    """Total cash across all markets (backward compat)."""
+    nse  = float(get_config("nse_cash",  get_config("cash", "100000")))
+    nyse = float(get_config("nyse_cash", "100000"))
+    return nse + nyse
+
+
+def get_market_cash(market: str) -> float:
+    key = f"{market}_cash"
+    fallback = get_config("cash", "100000") if market == "nse" else "100000"
+    return float(get_config(key, fallback))
 
 
 def set_cash(amount: float):
     set_config("cash", amount)
+
+
+def set_market_cash(market: str, amount: float):
+    set_config(f"{market}_cash", amount)
 
 
 def get_open_positions() -> pd.DataFrame:
@@ -117,10 +134,11 @@ def get_position(symbol: str) -> Optional[dict]:
 def open_position(symbol: str, entry_price: float, shares: int,
                   stop_loss: float, target: float,
                   confidence: float = None, regime: str = None):
-    cash = get_cash()
+    market = _market_of(symbol)
+    cash = get_market_cash(market)
     cost = entry_price * shares
     if cost > cash:
-        raise ValueError(f"Insufficient cash: need {cost:.2f}, have {cash:.2f}")
+        raise ValueError(f"Insufficient {market.upper()} cash: need {cost:.2f}, have {cash:.2f}")
     with get_connection() as conn:
         conn.execute(
             """INSERT OR REPLACE INTO paper_positions
@@ -129,7 +147,7 @@ def open_position(symbol: str, entry_price: float, shares: int,
             (symbol, datetime.utcnow().isoformat(), entry_price, shares,
              stop_loss, target, confidence, regime)
         )
-    set_cash(cash - cost)
+    set_market_cash(market, cash - cost)
 
 
 def close_position(symbol: str, exit_price: float, exit_reason: str) -> dict:
@@ -161,8 +179,9 @@ def close_position(symbol: str, exit_price: float, exit_reason: str) -> dict:
         )
         conn.execute("DELETE FROM paper_positions WHERE symbol = ?", (symbol,))
 
-    cash = get_cash()
-    set_cash(cash + exit_proceeds_net)
+    market = _market_of(symbol)
+    cash = get_market_cash(market)
+    set_market_cash(market, cash + exit_proceeds_net)
     return {"symbol": symbol, "net_pnl": net_pnl, "return_pct": return_pct, "exit_reason": exit_reason}
 
 
@@ -216,23 +235,34 @@ def get_portfolio_log() -> pd.DataFrame:
     return df
 
 
-def reset_portfolio(initial_cash: float = 100_000.0):
-    """Wipe paper trading state and restart with fresh cash."""
+def reset_portfolio(initial_cash: float = 100_000.0,
+                    nse_allocation: float = None,
+                    nyse_allocation: float = None):
+    """Wipe paper trading state and restart with fresh per-market cash.
+
+    nse_allocation  — starting NSE capital (default: half of initial_cash)
+    nyse_allocation — starting NYSE capital (default: half of initial_cash)
+    Both default to initial_cash/2 so combined = initial_cash.
+    """
+    nse_cash  = nse_allocation  if nse_allocation  is not None else initial_cash / 2
+    nyse_cash = nyse_allocation if nyse_allocation is not None else initial_cash / 2
+    total = nse_cash + nyse_cash
     with get_connection() as conn:
         conn.executescript("""
             DELETE FROM paper_positions;
             DELETE FROM paper_trades;
             DELETE FROM paper_portfolio_log;
         """)
-        conn.execute(
-            "INSERT OR REPLACE INTO paper_config (key, value) VALUES ('initial_cash', ?)",
-            (str(initial_cash),)
-        )
-        conn.execute(
-            "INSERT OR REPLACE INTO paper_config (key, value) VALUES ('cash', ?)",
-            (str(initial_cash),)
-        )
-        conn.execute(
-            "INSERT OR REPLACE INTO paper_config (key, value) VALUES ('peak_value', ?)",
-            (str(initial_cash),)
-        )
+        for key, val in [
+            ("initial_cash",      total),
+            ("nse_initial_cash",  nse_cash),
+            ("nyse_initial_cash", nyse_cash),
+            ("cash",              total),
+            ("nse_cash",          nse_cash),
+            ("nyse_cash",         nyse_cash),
+            ("peak_value",        total),
+        ]:
+            conn.execute(
+                "INSERT OR REPLACE INTO paper_config (key, value) VALUES (?, ?)",
+                (key, str(val))
+            )

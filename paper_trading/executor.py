@@ -10,7 +10,8 @@ from typing import Optional
 
 from config import BROKERAGE_PCT, SLIPPAGE_PCT, MAX_RISK_PCT
 from paper_trading.portfolio import (
-    get_cash, get_position, open_position, close_position,
+    get_cash, get_market_cash, _market_of,
+    get_position, open_position, close_position,
     get_open_positions,
 )
 
@@ -66,11 +67,11 @@ def try_open(symbol: str, signal_row: dict, next_open: float,
         logger.warning("%s: position size = 0 (stop too close or cash too low)", symbol)
         return None
 
-    cash = get_cash()
+    cash = get_market_cash(_market_of(symbol))
     if fill * shares > cash:
         shares = int(cash * 0.95 / fill)  # use up to 95% of cash
         if shares <= 0:
-            logger.warning("%s: insufficient cash for even 1 share", symbol)
+            logger.warning("%s: insufficient %s cash for even 1 share", symbol, _market_of(symbol).upper())
             return None
 
     open_position(

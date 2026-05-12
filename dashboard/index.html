@@ -244,37 +244,37 @@
 
 <main class="z1">
 
-  <!-- ── Total Portfolio Metrics ── -->
+  <!-- ── Top Metrics (markets kept separate — currencies don't mix) ── -->
   <div class="metrics-row">
-    <div class="metric-card">
-      <div class="metric-label">Total Portfolio</div>
-      <div class="metric-val text-cyan glow-cyan" id="m-total">—</div>
-      <div class="metric-sub" id="m-total-sub">combined NSE + NYSE</div>
+    <div class="metric-card" style="border-color:rgba(56,189,248,.25)">
+      <div class="metric-label" style="color:var(--cyan)">◉ NSE Portfolio</div>
+      <div class="metric-val text-cyan glow-cyan" id="m-nse-total">—</div>
+      <div class="metric-sub" id="m-nse-total-sub">—</div>
+    </div>
+    <div class="metric-card" style="border-color:rgba(56,189,248,.25)">
+      <div class="metric-label" style="color:var(--cyan)">◉ NSE Cash ₹</div>
+      <div class="metric-val text-white" id="m-nse-cash">—</div>
+      <div class="metric-sub" id="m-nse-cash-pct">—</div>
+    </div>
+    <div class="metric-card" style="border-color:rgba(251,191,36,.25)">
+      <div class="metric-label" style="color:var(--amber)">◉ NYSE Portfolio</div>
+      <div class="metric-val text-amber" id="m-nyse-total">—</div>
+      <div class="metric-sub" id="m-nyse-total-sub">—</div>
+    </div>
+    <div class="metric-card" style="border-color:rgba(251,191,36,.25)">
+      <div class="metric-label" style="color:var(--amber)">◉ NYSE Cash $</div>
+      <div class="metric-val text-white" id="m-nyse-cash">—</div>
+      <div class="metric-sub" id="m-nyse-cash-pct">—</div>
     </div>
     <div class="metric-card">
-      <div class="metric-label">Cash Available</div>
-      <div class="metric-val text-white" id="m-cash">—</div>
-      <div class="metric-sub" id="m-cash-pct">—</div>
-    </div>
-    <div class="metric-card">
-      <div class="metric-label">Total P&amp;L</div>
-      <div class="metric-val" id="m-pnl">—</div>
-      <div class="metric-sub" id="m-pnl-pct">—</div>
-    </div>
-    <div class="metric-card">
-      <div class="metric-label">Overall Win Rate</div>
+      <div class="metric-label">Win Rate</div>
       <div class="metric-val text-green" id="m-wr">—</div>
       <div class="metric-sub" id="m-wr-sub">—</div>
     </div>
     <div class="metric-card">
-      <div class="metric-label">Max Drawdown</div>
-      <div class="metric-val text-amber" id="m-dd">—</div>
-      <div class="metric-sub">peak → trough</div>
-    </div>
-    <div class="metric-card">
       <div class="metric-label">Open Positions</div>
       <div class="metric-val text-cyan" id="m-open">—</div>
-      <div class="metric-sub" id="m-open-sub">of 5 max</div>
+      <div class="metric-sub" id="m-open-sub">NSE + NYSE</div>
     </div>
   </div>
 
@@ -289,9 +289,19 @@
         <span id="nse-mkt-badge" style="margin-left:auto;font-size:10px;color:var(--muted)"></span>
       </div>
       <div class="market-panel-body">
-        <div class="mini-metrics">
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px">
           <div class="mini-card">
-            <div class="metric-label">P&amp;L</div>
+            <div class="metric-label">Portfolio ₹</div>
+            <div class="mini-val text-cyan" id="nse-portfolio">—</div>
+            <div class="metric-sub" id="nse-portfolio-sub">total value</div>
+          </div>
+          <div class="mini-card">
+            <div class="metric-label">Cash ₹</div>
+            <div class="mini-val text-white" id="nse-cash">—</div>
+            <div class="metric-sub" id="nse-cash-pct">—</div>
+          </div>
+          <div class="mini-card">
+            <div class="metric-label">P&amp;L ₹</div>
             <div class="mini-val" id="nse-pnl">—</div>
             <div class="metric-sub" id="nse-pnl-pct">—</div>
           </div>
@@ -311,6 +321,7 @@
             <div class="metric-sub">closed</div>
           </div>
         </div>
+        <div style="height:80px"><canvas id="nse-eq-chart"></canvas></div>
       </div>
     </div>
 
@@ -322,9 +333,19 @@
         <span id="nyse-mkt-badge" style="margin-left:auto;font-size:10px;color:var(--muted)"></span>
       </div>
       <div class="market-panel-body">
-        <div class="mini-metrics">
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px">
           <div class="mini-card">
-            <div class="metric-label">P&amp;L</div>
+            <div class="metric-label">Portfolio $</div>
+            <div class="mini-val text-amber" id="nyse-portfolio">—</div>
+            <div class="metric-sub" id="nyse-portfolio-sub">total value</div>
+          </div>
+          <div class="mini-card">
+            <div class="metric-label">Cash $</div>
+            <div class="mini-val text-white" id="nyse-cash">—</div>
+            <div class="metric-sub" id="nyse-cash-pct">—</div>
+          </div>
+          <div class="mini-card">
+            <div class="metric-label">P&amp;L $</div>
             <div class="mini-val" id="nyse-pnl">—</div>
             <div class="metric-sub" id="nyse-pnl-pct">—</div>
           </div>
@@ -344,6 +365,7 @@
             <div class="metric-sub">closed</div>
           </div>
         </div>
+        <div style="height:80px"><canvas id="nyse-eq-chart"></canvas></div>
       </div>
     </div>
 
@@ -353,7 +375,7 @@
   <div class="charts-row">
     <div class="card card-glow">
       <div class="card-header">
-        <span class="card-title">Equity Curve</span>
+        <span class="card-title">NSE Equity Curve ₹</span>
         <div style="display:flex;gap:16px;align-items:center">
           <span class="card-sub" id="eq-range">loading…</span>
           <span class="card-sub" id="eq-change" style="font-family:var(--mono)"></span>
@@ -494,7 +516,7 @@
 <script>
 const API = '';
 let watchlist = JSON.parse(localStorage.getItem('nxWatchlist') || '["RELIANCE.NS","TCS.NS","HDFCBANK.NS","AAPL","MSFT"]');
-let eqChart = null, wlChart = null;
+let eqChart = null, wlChart = null, nseEqChart = null, nyseEqChart = null;
 let lastPortfolio = null;
 let _allTrades = [], _tradePage = 1, _marketFilter = 'all';
 
@@ -602,30 +624,77 @@ async function loadPortfolio() {
   try {
     const pf = await fetch(`${API}/api/portfolio`).then(r=>r.json());
     lastPortfolio = pf;
-    const pnl = pf.total_pnl || 0;
-    const initial = parseFloat(pf.initial_cash) || 100000;
-    const pnlPct = pnl / initial;
 
-    setText('m-total', fmtM(pf.total_value), 'metric-val text-cyan glow-cyan');
-    setText('m-cash', fmtM(pf.cash));
-    document.getElementById('m-cash-pct').textContent = isN(pf.cash)&&isN(pf.total_value)
-      ? ((pf.cash/pf.total_value)*100).toFixed(1)+'% deployed as cash' : '—';
+    // ── NSE top cards (₹) ──
+    const n = pf.nse || {};
+    setText('m-nse-total', fmtM(n.total_value), 'metric-val text-cyan glow-cyan');
+    const nPnl = n.total_pnl || 0;
+    document.getElementById('m-nse-total-sub').textContent =
+      isN(nPnl) ? (nPnl>=0?'+':'')+fmtM(nPnl)+' P&L' : 'no trades yet';
+    setText('m-nse-cash', fmtM(n.cash));
+    document.getElementById('m-nse-cash-pct').textContent = isN(n.cash)&&n.total_value>0
+      ? ((n.cash/n.total_value)*100).toFixed(1)+'% in cash' : '—';
 
-    const pnlEl = document.getElementById('m-pnl');
-    pnlEl.textContent = fmtPM(pnl);
-    pnlEl.className = `metric-val ${pnl>=0?'text-green glow-green':'text-red glow-red'}`;
-    document.getElementById('m-pnl-pct').textContent = fmtPP(pnlPct);
+    // ── NYSE top cards ($) ──
+    const y = pf.nyse || {};
+    setText('m-nyse-total', fmtM(y.total_value, true), 'metric-val text-amber');
+    const yPnl = y.total_pnl || 0;
+    document.getElementById('m-nyse-total-sub').textContent =
+      isN(yPnl) ? (yPnl>=0?'+':'')+fmtM(yPnl,true)+' P&L' : 'no trades yet';
+    setText('m-nyse-cash', fmtM(y.cash, true));
+    document.getElementById('m-nyse-cash-pct').textContent = isN(y.cash)&&y.total_value>0
+      ? ((y.cash/y.total_value)*100).toFixed(1)+'% in cash' : '—';
 
+    // ── Win rate + open positions (dimensionless — safe to combine) ──
     const wt = pf.n_trades||0, wr = pf.win_rate||0;
     setText('m-wr', fmtP(wr), 'metric-val text-green');
     const wn = Math.round(wr*wt);
     document.getElementById('m-wr-sub').textContent = wt ? `${wn}W / ${wt-wn}L of ${wt} trades` : 'no trades yet';
 
-    setText('m-dd', fmtP(pf.drawdown_pct), 'metric-val text-amber');
     const openPos = pf.open_positions||[];
+    const nseOpen = openPos.filter(p=>isNSE(p.symbol)).length;
+    const nyseOpen = openPos.filter(p=>!isNSE(p.symbol)).length;
     setText('m-open', openPos.length, 'metric-val text-cyan');
+    document.getElementById('m-open-sub').textContent = `NSE ${nseOpen} · NYSE ${nyseOpen}`;
 
     renderPositions(openPos);
+
+    // ── Per-market panels from API ──
+    if (pf.nse) {
+      const n = pf.nse;
+      setMini('nse-portfolio', fmtM(n.total_value), 'mini-val text-cyan');
+      setMini('nse-cash', fmtM(n.cash));
+      const el = document.getElementById('nse-cash-pct');
+      if (el) el.textContent = n.total_value > 0 ? ((n.cash/n.total_value)*100).toFixed(1)+'% in cash' : '—';
+      const pnlEl = document.getElementById('nse-pnl');
+      if (pnlEl) { pnlEl.textContent = fmtPM(n.total_pnl); pnlEl.className = `mini-val ${n.total_pnl>=0?'text-green':'text-red'}`; }
+      setMini('nse-pnl-pct', fmtPP(n.pnl_pct));
+      setMini('nse-wr', fmtP(n.win_rate), n.win_rate>=0.5?'mini-val text-green':'mini-val text-red');
+      const nWn = Math.round((n.win_rate||0)*n.n_trades);
+      const nWrSub = document.getElementById('nse-wr-sub');
+      if (nWrSub) nWrSub.textContent = n.n_trades ? `${nWn}W / ${n.n_trades-nWn}L` : 'no trades';
+      setMini('nse-trades', n.n_trades);
+      const sub = document.getElementById('nse-portfolio-sub');
+      if (sub) sub.textContent = `init ₹${(n.initial_cash/1000).toFixed(0)}K`;
+    }
+    if (pf.nyse) {
+      const y = pf.nyse;
+      setMini('nyse-portfolio', fmtM(y.total_value, true), 'mini-val text-amber');
+      setMini('nyse-cash', fmtM(y.cash, true));
+      const el = document.getElementById('nyse-cash-pct');
+      if (el) el.textContent = y.total_value > 0 ? ((y.cash/y.total_value)*100).toFixed(1)+'% in cash' : '—';
+      const pnlEl = document.getElementById('nyse-pnl');
+      if (pnlEl) { pnlEl.textContent = fmtPM(y.total_pnl, true); pnlEl.className = `mini-val ${y.total_pnl>=0?'text-green':'text-red'}`; }
+      setMini('nyse-pnl-pct', fmtPP(y.pnl_pct));
+      setMini('nyse-wr', fmtP(y.win_rate), y.win_rate>=0.5?'mini-val text-green':'mini-val text-red');
+      const yWn = Math.round((y.win_rate||0)*y.n_trades);
+      const yWrSub = document.getElementById('nyse-wr-sub');
+      if (yWrSub) yWrSub.textContent = y.n_trades ? `${yWn}W / ${y.n_trades-yWn}L` : 'no trades';
+      setMini('nyse-trades', y.n_trades);
+      const sub = document.getElementById('nyse-portfolio-sub');
+      if (sub) sub.textContent = `init $${(y.initial_cash/1000).toFixed(0)}K`;
+    }
+
     setConn(true);
   } catch(e) { setConn(false); }
 }
@@ -671,10 +740,13 @@ function renderPositions(positions) {
   document.getElementById('nyse-open').textContent = nyse.length;
 }
 
-// ── Market-split stats ────────────────────────────────────────────────────
+// ── Market-split stats (trade-history fallback — primary data from loadPortfolio) ──
 function updateMarketStats(trades) {
+  // Only fill fields not already set by pf.nse/pf.nyse (i.e. when API returns no per-market block)
+  if (lastPortfolio?.nse && lastPortfolio?.nyse) return;
   const initial = parseFloat(lastPortfolio?.initial_cash)||100000;
   ['nse','nyse'].forEach(mkt => {
+    const usd = mkt==='nyse';
     const sub = mkt==='nse'
       ? trades.filter(t=>isNSE(t.symbol))
       : trades.filter(t=>!isNSE(t.symbol));
@@ -682,16 +754,45 @@ function updateMarketStats(trades) {
     const wr    = sub.length ? sub.filter(t=>t.net_pnl>=0).length/sub.length : 0;
     const wn    = Math.round(wr*sub.length);
     const pnlEl = document.getElementById(`${mkt}-pnl`);
-    if (pnlEl) {
-      pnlEl.textContent = fmtPM(pnl);
-      pnlEl.className = `mini-val ${pnl>=0?'text-green':'text-red'}`;
-    }
+    if (pnlEl) { pnlEl.textContent = fmtPM(pnl,usd); pnlEl.className = `mini-val ${pnl>=0?'text-green':'text-red'}`; }
     setMini(`${mkt}-pnl-pct`, fmtPP(pnl/initial));
     setMini(`${mkt}-wr`, fmtP(wr), sub.length ? (wr>=0.5?'mini-val text-green':'mini-val text-red') : 'mini-val text-muted');
-    document.getElementById(`${mkt}-wr-sub`) && (document.getElementById(`${mkt}-wr-sub`).textContent =
-      sub.length ? `${wn}W / ${sub.length-wn}L` : 'no trades');
+    const wrSub = document.getElementById(`${mkt}-wr-sub`);
+    if (wrSub) wrSub.textContent = sub.length ? `${wn}W / ${sub.length-wn}L` : 'no trades';
     setMini(`${mkt}-trades`, sub.length);
   });
+}
+
+// ── Market mini equity charts ─────────────────────────────────────────────
+function renderMarketEquity(canvasId, trades, initialCash, usd, oldChart) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return oldChart;
+  if (oldChart) { try { oldChart.destroy(); } catch(e) {} }
+  const sorted = [...trades].sort((a,b)=>(a.exit_time||'')<(b.exit_time||'')?-1:1);
+  if (!sorted.length) return null;
+  let cum = initialCash;
+  const labels = [''];
+  const values = [cum];
+  sorted.forEach(t => { cum += (t.net_pnl||0); labels.push(''); values.push(cum); });
+  const pos = values[values.length-1] >= initialCash;
+  const lc = pos ? '#00ff88' : '#ff3366';
+  const gc = pos ? 'rgba(0,255,136,' : 'rgba(255,51,102,';
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createLinearGradient(0,0,0,80);
+  grad.addColorStop(0, gc+'0.3)'); grad.addColorStop(1, gc+'0)');
+  return new Chart(ctx, {
+    type:'line',
+    data:{ labels, datasets:[{ data:values, borderColor:lc, backgroundColor:grad,
+      borderWidth:1.5, pointRadius:0, fill:true, tension:0.35 }] },
+    options:{ responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false}, tooltip:{enabled:false} },
+      scales:{
+        x:{display:false},
+        y:{ display:true, position:'right', grid:{color:'rgba(255,255,255,.04)'},
+          ticks:{ color:'#4a5568', font:{family:'JetBrains Mono',size:8}, maxTicksLimit:3,
+            callback:v=>usd?'$'+(v/1000).toFixed(0)+'K':'₹'+(v/1000).toFixed(0)+'K' },
+          border:{display:false} }
+      }}});
 }
 
 // ── Trades ────────────────────────────────────────────────────────────────
@@ -705,6 +806,13 @@ async function loadTrades() {
     renderPnlBars(trades.slice(0,10));
     renderSignalFeed(trades.slice(0,8));
     renderWinLoss(trades);
+    // Per-market mini equity curves
+    const nseTrades  = trades.filter(t=>isNSE(t.symbol));
+    const nyseTrades = trades.filter(t=>!isNSE(t.symbol));
+    const nseInit  = parseFloat(lastPortfolio?.nse?.initial_cash)  || 100000;
+    const nyseInit = parseFloat(lastPortfolio?.nyse?.initial_cash) || 100000;
+    nseEqChart  = renderMarketEquity('nse-eq-chart',  nseTrades,  nseInit,  false, nseEqChart);
+    nyseEqChart = renderMarketEquity('nyse-eq-chart', nyseTrades, nyseInit, true,  nyseEqChart);
   } catch(e) {}
 }
 
@@ -849,10 +957,22 @@ function renderWinLoss(trades) {
 // ── Equity ────────────────────────────────────────────────────────────────
 async function loadEquity() {
   try {
-    const data = await fetch(`${API}/api/portfolio/equity`).then(r=>r.json());
-    if (!data.length) return;
-    const labels = data.map(d=>{const s=fmt_dt(d.timestamp);return s.length>=16?s.slice(5,16):s;});
-    const values = data.map(d=>d.total_value);
+    // NSE-only equity curve — built from NSE trade history (currencies don't mix)
+    const trades = _allTrades.filter(t => isNSE(t.symbol));
+    const sorted = [...trades].sort((a,b)=>(a.exit_time||'')<(b.exit_time||'')?-1:1);
+    const initial = parseFloat(lastPortfolio?.nse?.initial_cash) || 100000;
+    let cum = initial;
+    const labels = ['Start'];
+    const values = [cum];
+    if (!sorted.length) {
+      // No trades yet — render a flat baseline so chart isn't blank
+      const now = new Date();
+      for (let i = 1; i <= 10; i++) labels.push(''), values.push(initial);
+      document.getElementById('eq-range').textContent = `No NSE trades yet — flat at ₹${initial.toLocaleString('en-IN')}`;
+      document.getElementById('eq-change').textContent = '';
+    } else {
+      sorted.forEach(t => { cum += (t.net_pnl||0); labels.push(fmt_dt(t.exit_time).slice(5,16)); values.push(cum); });
+    }
     const first=values[0], last=values[values.length-1], chg=last-first, pos=chg>=0;
     const lc=pos?'#00ff88':'#ff3366', gc=pos?'rgba(0,255,136,':'rgba(255,51,102,';
     document.getElementById('eq-range').textContent=`${labels[0]} → ${labels[labels.length-1]}  (${data.length} snapshots)`;
