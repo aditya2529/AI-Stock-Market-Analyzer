@@ -198,7 +198,11 @@
     /* ─── Health tab ─── */
     .kv-grid{display:grid;grid-template-columns:max-content 1fr;gap:8px 18px;font-family:var(--mono);font-size:11px}
     .kv-grid .k{color:var(--label);text-transform:uppercase;letter-spacing:.5px}
+    .kv-grid .k[title]{cursor:help;border-bottom:1px dotted var(--label);display:inline-block}
     .kv-grid .v{color:var(--text);text-align:right;word-break:break-all}
+    .metric-card[title]{cursor:help}
+    .card[title]{position:relative}
+    .card[title] .card-title{cursor:help;border-bottom:1px dotted var(--label);padding-bottom:2px}
     .kv-grid .v.good{color:var(--green)}
     .kv-grid .v.warn{color:var(--amber)}
     .kv-grid .v.bad{color:var(--red)}
@@ -241,7 +245,7 @@
         <span class="label">NSE</span>
         <span id="market-status" class="val">—</span>
       </div>
-      <div class="stat-pill">
+      <div class="stat-pill" style="display:none">
         <span class="label">NYSE</span>
         <span id="nyse-status" class="val">—</span>
       </div>
@@ -271,10 +275,12 @@
 
   <!-- ── Tab Navigation ── -->
   <div class="tab-nav">
-    <button class="tab-btn active" data-tab="trading" onclick="switchTab('trading')">
+    <button class="tab-btn active" data-tab="trading" onclick="switchTab('trading')"
+            title="View your portfolio, open positions, and trade history.">
       <span class="tab-icon">▣</span> TRADING
     </button>
-    <button class="tab-btn" data-tab="health" onclick="switchTab('health')">
+    <button class="tab-btn" data-tab="health" onclick="switchTab('health')"
+            title="View whether the trading engine is healthy, how much memory it is using, and any recent errors. A red dot here means something is wrong.">
       <span class="tab-icon">◉</span> SYSTEM HEALTH
       <span class="tab-badge" id="health-badge" style="display:none">!</span>
     </button>
@@ -282,8 +288,8 @@
 
   <div id="tab-trading" class="tab-panel">
 
-  <!-- ── Top Metrics (markets kept separate — currencies don't mix) ── -->
-  <div class="metrics-row">
+  <!-- ── Top Metrics (NSE-only) ── -->
+  <div class="metrics-row" style="grid-template-columns:repeat(4,1fr)">
     <div class="metric-card" style="border-color:rgba(56,189,248,.25)">
       <div class="metric-label" style="color:var(--cyan)">◉ NSE Portfolio</div>
       <div class="metric-val text-cyan glow-cyan" id="m-nse-total">—</div>
@@ -294,12 +300,12 @@
       <div class="metric-val text-white" id="m-nse-cash">—</div>
       <div class="metric-sub" id="m-nse-cash-pct">—</div>
     </div>
-    <div class="metric-card" style="border-color:rgba(251,191,36,.25)">
+    <div class="metric-card" style="display:none">
       <div class="metric-label" style="color:var(--amber)">◉ NYSE Portfolio</div>
       <div class="metric-val text-amber" id="m-nyse-total">—</div>
       <div class="metric-sub" id="m-nyse-total-sub">—</div>
     </div>
-    <div class="metric-card" style="border-color:rgba(251,191,36,.25)">
+    <div class="metric-card" style="display:none">
       <div class="metric-label" style="color:var(--amber)">◉ NYSE Cash $</div>
       <div class="metric-val text-white" id="m-nyse-cash">—</div>
       <div class="metric-sub" id="m-nyse-cash-pct">—</div>
@@ -312,12 +318,12 @@
     <div class="metric-card">
       <div class="metric-label">Open Positions</div>
       <div class="metric-val text-cyan" id="m-open">—</div>
-      <div class="metric-sub" id="m-open-sub">NSE + NYSE</div>
+      <div class="metric-sub" id="m-open-sub">NSE</div>
     </div>
   </div>
 
-  <!-- ── NSE + NYSE Split Panels ── -->
-  <div class="split-metrics">
+  <!-- ── NSE Panel (NYSE hidden) ── -->
+  <div class="split-metrics" style="grid-template-columns:1fr">
 
     <!-- NSE Panel -->
     <div class="market-panel">
@@ -363,8 +369,8 @@
       </div>
     </div>
 
-    <!-- NYSE Panel -->
-    <div class="market-panel">
+    <!-- NYSE Panel (hidden) -->
+    <div class="market-panel" style="display:none">
       <div class="market-panel-header market-panel-nyse">
         <span class="market-tag tag-nyse">◉ NYSE/NASDAQ</span>
         <span style="font-size:11px;color:var(--label)">USA — Paper</span>
@@ -450,8 +456,8 @@
     </div>
   </div>
 
-  <!-- ── NYSE Open Positions ── -->
-  <div>
+  <!-- ── NYSE Open Positions (hidden) ── -->
+  <div style="display:none">
     <div class="section-hdr"><span class="market-tag tag-nyse" style="margin-right:4px">NYSE</span> Open Positions</div>
     <div class="card" style="overflow-x:auto">
       <table>
@@ -509,18 +515,18 @@
 
   <!-- ── Trade History (ALL) ── -->
   <div>
-    <div class="section-hdr">Trade History — All Markets</div>
+    <div class="section-hdr">NSE Trade History</div>
     <div class="card" style="overflow-x:auto">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
         <div style="font-size:11px;color:var(--muted)" id="trades-info">—</div>
         <div style="display:flex;align-items:center;gap:8px">
           <!-- Market filter -->
           <div style="display:flex;gap:4px">
-            <button class="pg-btn active" id="filter-all" onclick="setMarketFilter('all')">ALL</button>
-            <button class="pg-btn" id="filter-nse" onclick="setMarketFilter('nse')">
+            <button class="pg-btn" id="filter-all" onclick="setMarketFilter('all')" style="display:none">ALL</button>
+            <button class="pg-btn active" id="filter-nse" onclick="setMarketFilter('nse')">
               <span style="color:var(--cyan)">NSE</span>
             </button>
-            <button class="pg-btn" id="filter-nyse" onclick="setMarketFilter('nyse')">
+            <button class="pg-btn" id="filter-nyse" onclick="setMarketFilter('nyse')" style="display:none">
               <span style="color:var(--amber)">NYSE</span>
             </button>
           </div>
@@ -558,22 +564,22 @@
 
     <!-- Top status row -->
     <div class="metrics-row" style="grid-template-columns:repeat(4,1fr)">
-      <div class="metric-card" id="h-engine-card">
+      <div class="metric-card" id="h-engine-card" title="Is the trading engine running right now? GREEN = healthy and working. RED = stopped or crashed (no trades being made).">
         <div class="metric-label">◉ Engine</div>
         <div class="metric-val" id="h-engine-val">—</div>
         <div class="metric-sub" id="h-engine-sub">—</div>
       </div>
-      <div class="metric-card" id="h-heartbeat-card">
+      <div class="metric-card" id="h-heartbeat-card" title="The engine writes a tiny 'I am alive' signal every 5 minutes. FRESH = engine is working. STALE = a bit slow. DEAD = engine is silent and probably stuck — you'll get a Telegram alert.">
         <div class="metric-label">⚡ Heartbeat</div>
         <div class="metric-val" id="h-heartbeat-val">—</div>
         <div class="metric-sub" id="h-heartbeat-sub">—</div>
       </div>
-      <div class="metric-card" id="h-mem-card">
+      <div class="metric-card" id="h-mem-card" title="How much of the server's memory (RAM) is being used. Below 70% = healthy. 70-85% = warning. Above 85% = danger — engine may crash.">
         <div class="metric-label">▤ VPS RAM</div>
         <div class="metric-val" id="h-mem-val">—</div>
         <div class="metric-sub" id="h-mem-sub">—</div>
       </div>
-      <div class="metric-card" id="h-market-card">
+      <div class="metric-card" id="h-market-card" title="Is the Indian stock market (NSE) open for trading right now? Hours: 9:15 AM to 3:30 PM IST, Monday to Friday.">
         <div class="metric-label">▤ Market</div>
         <div class="metric-val" id="h-market-val">—</div>
         <div class="metric-sub" id="h-market-sub">—</div>
@@ -582,14 +588,14 @@
 
     <!-- Engine + Dashboard service detail -->
     <div class="split-metrics">
-      <div class="card">
+      <div class="card" title="Detailed status of the trading engine — the program that watches the market and places trades for you.">
         <div class="card-header">
           <span class="card-title">Intraday Engine — systemd</span>
           <span class="card-sub" id="h-int-sub">—</span>
         </div>
         <div id="h-intraday-detail" class="kv-grid"></div>
       </div>
-      <div class="card">
+      <div class="card" title="Detailed status of the dashboard server — the program that shows you this web page.">
         <div class="card-header">
           <span class="card-title">Dashboard Service — systemd</span>
           <span class="card-sub" id="h-dash-sub">—</span>
@@ -600,13 +606,13 @@
 
     <!-- VPS + Pipeline -->
     <div class="split-metrics">
-      <div class="card">
+      <div class="card" title="The health of the cloud server (VPS) that runs your trading engine 24/7. If the server is sick, the engine cannot trade.">
         <div class="card-header">
           <span class="card-title">VPS Vitals</span>
         </div>
         <div id="h-vps-detail" class="kv-grid"></div>
       </div>
-      <div class="card">
+      <div class="card" title="Today's trading activity numbers — how many trades the engine opened, closed, and how fast it could think.">
         <div class="card-header">
           <span class="card-title">Pipeline Today</span>
           <span class="card-sub" id="h-pipe-sub">—</span>
@@ -617,7 +623,7 @@
 
     <!-- Errors / Warnings -->
     <div class="split-metrics">
-      <div class="card">
+      <div class="card" title="Serious problems the engine ran into today. If you see a lot of these, something is wrong.">
         <div class="card-header">
           <span class="card-title">Recent ERRORS</span>
           <span class="card-sub" id="h-err-count">0</span>
@@ -626,7 +632,7 @@
           <div style="color:var(--muted);font-size:11px">none</div>
         </div>
       </div>
-      <div class="card">
+      <div class="card" title="Things the engine noticed but kept working. Mostly harmless, but worth a glance if many appear.">
         <div class="card-header">
           <span class="card-title">Recent WARNINGS</span>
           <span class="card-sub" id="h-warn-count">0</span>
@@ -653,7 +659,7 @@ const API = '';
 let watchlist = JSON.parse(localStorage.getItem('nxWatchlist') || '["RELIANCE.NS","TCS.NS","HDFCBANK.NS","AAPL","MSFT"]');
 let eqChart = null, wlChart = null, nseEqChart = null, nyseEqChart = null;
 let lastPortfolio = null;
-let _allTrades = [], _tradePage = 1, _marketFilter = 'all';
+let _allTrades = [], _tradePage = 1, _marketFilter = 'nse';
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 const isN   = n => Number.isFinite(Number(n));
@@ -1291,8 +1297,9 @@ function fmtAge(sec) {
   return (sec/3600).toFixed(1) + 'h ago';
 }
 
-function kv(label, value, cls) {
-  return `<div class="k">${label}</div><div class="v ${cls||''}">${value}</div>`;
+function kv(label, value, cls, tip) {
+  const t = tip ? ` title="${escapeHtml(tip)}"` : '';
+  return `<div class="k"${t}>${label}</div><div class="v ${cls||''}"${t}>${value}</div>`;
 }
 
 function pill(text, cls) {
@@ -1332,55 +1339,87 @@ async function loadHealth() {
     // ── Intraday systemd detail ──
     const intDet = document.getElementById('h-intraday-detail');
     intDet.innerHTML =
-      kv('Active', eng.active, engOk?'good':'bad') +
-      kv('Enabled', eng.enabled) +
-      kv('Memory', `${eng.memory_mb} MB`) +
-      kv('PID', eng.pid || '—') +
-      kv('Restarts', eng.restarts, eng.restarts > 3 ? 'warn' : 'good') +
-      kv('Last result', eng.last_result || '—') +
-      kv('Started', (eng.started_at || '—').slice(0, 28));
+      kv('Active', eng.active, engOk?'good':'bad',
+         'Is the engine running right now? "active" = yes, anything else = no.') +
+      kv('Enabled', eng.enabled, '',
+         'Will the engine start automatically? "disabled" is OK here because a timer starts it at 9:10 AM IST.') +
+      kv('Memory', `${eng.memory_mb} MB`, '',
+         'How much RAM the engine is using. Maximum allowed is 700 MB — if it goes over, the engine is killed and restarted.') +
+      kv('PID', eng.pid || '—', '',
+         'Process ID — like a badge number for the engine on the server. Changes after every restart.') +
+      kv('Restarts', eng.restarts, eng.restarts > 3 ? 'warn' : 'good',
+         'How many times the engine crashed and restarted itself today. 0 is best. More than 3 means something is wrong.') +
+      kv('Last result', eng.last_result || '—', '',
+         'How the engine last finished. "success" = clean stop. Anything else = crash.') +
+      kv('Started', (eng.started_at || '—').slice(0, 28), '',
+         'When the engine was last started.');
 
     const dash = h.services.dashboard;
     const dashOk = dash.active === 'active';
     document.getElementById('h-dashboard-detail').innerHTML =
-      kv('Active', dash.active, dashOk?'good':'bad') +
-      kv('Enabled', dash.enabled) +
-      kv('Memory', `${dash.memory_mb} MB`) +
-      kv('PID', dash.pid || '—') +
-      kv('Restarts', dash.restarts, dash.restarts > 3 ? 'warn' : 'good') +
-      kv('Started', (dash.started_at || '—').slice(0, 28));
+      kv('Active', dash.active, dashOk?'good':'bad',
+         'Is the dashboard server running? If "active" you can see this page. Otherwise the page would not load.') +
+      kv('Enabled', dash.enabled, '',
+         'Does the dashboard auto-start when the server reboots? Should be "enabled".') +
+      kv('Memory', `${dash.memory_mb} MB`, '',
+         'How much RAM the dashboard uses. Maximum allowed is 300 MB.') +
+      kv('PID', dash.pid || '—', '',
+         'Process ID — the dashboard\'s badge number on the server.') +
+      kv('Restarts', dash.restarts, dash.restarts > 3 ? 'warn' : 'good',
+         'How many times the dashboard crashed today. 0 is best.') +
+      kv('Started', (dash.started_at || '—').slice(0, 28), '',
+         'When the dashboard last started.');
 
     // ── VPS vitals ──
     const v = h.vps;
     document.getElementById('h-vps-detail').innerHTML =
-      kv('Hostname', v.hostname) +
-      kv('Uptime', (v.uptime_hours || 0).toFixed(1) + ' hours') +
-      kv('Load 1/5/15', `${v.load_1m||0} / ${v.load_5m||0} / ${v.load_15m||0}`) +
+      kv('Hostname', v.hostname, '',
+         'The name of the cloud server.') +
+      kv('Uptime', (v.uptime_hours || 0).toFixed(1) + ' hours', '',
+         'How long since the server was last rebooted. Higher is better — restarts are bad.') +
+      kv('Load 1/5/15', `${v.load_1m||0} / ${v.load_5m||0} / ${v.load_15m||0}`, '',
+         'How busy the server is, averaged over the last 1, 5, and 15 minutes. Below 1.0 per CPU core is healthy.') +
       kv('RAM used', `${v.mem_used_mb}/${v.mem_total_mb} MB (${v.mem_used_pct}%)`,
-         memCls) +
-      kv('RAM available', `${v.mem_available_mb} MB`) +
-      kv('Swap', `${v.swap_used_mb||0}/${v.swap_total_mb||0} MB`) +
+         memCls,
+         'Memory used right now out of total memory. The server has only about 950 MB total — quite small.') +
+      kv('RAM available', `${v.mem_available_mb} MB`, '',
+         'Memory still free for new things. Below 100 MB is risky.') +
+      kv('Swap', `${v.swap_used_mb||0}/${v.swap_total_mb||0} MB`, '',
+         'Backup memory stored on disk (very slow). Should stay close to 0. If high, the engine slows down a lot.') +
       kv('Disk free', `${v.disk_free_gb}/${v.disk_total_gb} GB (${(100-v.disk_used_pct).toFixed(1)}% free)`,
-         v.disk_used_pct > 85 ? 'warn' : 'good');
+         v.disk_used_pct > 85 ? 'warn' : 'good',
+         'Storage space remaining on the server. Keep at least 2 GB free or the engine will fail to write logs and data.');
 
     // ── Pipeline ──
     const log = h.log;
     const lat = log.latency_samples || {};
     document.getElementById('h-pipeline-detail').innerHTML =
-      kv('Universe size', log.universe_size || '—') +
-      kv('Opens today', log.today_opens) +
-      kv('Closes today', log.today_closes) +
-      kv('SL hits', log.today_sl_hits, log.today_sl_hits > 5 ? 'warn' : '') +
-      kv('Target hits', log.today_target_hits, log.today_target_hits > 0 ? 'good' : '') +
-      kv('Force closes', log.today_force_closes) +
+      kv('Universe size', log.universe_size || '—', '',
+         'How many stocks the engine is watching today (picked from the broader market each morning).') +
+      kv('Opens today', log.today_opens, '',
+         'Number of new positions the engine opened (bought) today.') +
+      kv('Closes today', log.today_closes, '',
+         'Total number of positions the engine closed (sold) today.') +
+      kv('SL hits', log.today_sl_hits, log.today_sl_hits > 5 ? 'warn' : '',
+         'How many positions closed at stop-loss (a small planned loss). Many SL hits in one day means market is choppy or signals are weak.') +
+      kv('Target hits', log.today_target_hits, log.today_target_hits > 0 ? 'good' : '',
+         'How many positions hit profit target (a win!). More is better.') +
+      kv('Force closes', log.today_force_closes, '',
+         'Positions closed automatically at 3:15 PM because the market is about to close. Used to avoid holding overnight.') +
       (lat.n ? (
-        kv('Latency samples', lat.n) +
-        kv('Latency avg', lat.avg_sec + 's', lat.avg_sec > 5 ? 'warn' : 'good') +
-        kv('Latency p95', lat.p95_sec + 's', lat.p95_sec > 10 ? 'bad' : lat.p95_sec > 5 ? 'warn' : 'good') +
-        kv('Latency max', lat.max_sec + 's') +
-        kv('Over 1s gate', lat.over_1s, lat.over_1s > 10 ? 'warn' : '')
+        kv('Latency samples', lat.n, '',
+           'How many signal-generation timings we measured today. More samples = more confidence in the numbers below.') +
+        kv('Latency avg', lat.avg_sec + 's', lat.avg_sec > 5 ? 'warn' : 'good',
+           'Average time the engine takes to decide on one signal. Goal is under 1 second. If high, engine is overloaded.') +
+        kv('Latency p95', lat.p95_sec + 's', lat.p95_sec > 10 ? 'bad' : lat.p95_sec > 5 ? 'warn' : 'good',
+           '95% of signals are computed faster than this. If this is high, the engine occasionally misses the chance to act.') +
+        kv('Latency max', lat.max_sec + 's', '',
+           'The slowest single signal today. A few slow ones are OK if average is fine.') +
+        kv('Over 1s gate', lat.over_1s, lat.over_1s > 10 ? 'warn' : '',
+           'How many signals took longer than the 1-second target. Some are normal; many means the server needs more power.')
       ) : '') +
-      kv('Log size', `${log.size_kb} KB`);
+      kv('Log size', `${log.size_kb} KB`, '',
+         'How big the engine\'s log file is right now. Grows during the day — gets reset/rotated automatically.');
 
     // ── Errors + Warnings ──
     const errs = log.errors_recent || [];
