@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
 
-from api.routes import signals, portfolio, market
+from api.routes import signals, portfolio, market, health
 
 app = FastAPI(
     title="AI Stock Analyzer",
@@ -23,6 +23,7 @@ app.add_middleware(
 app.include_router(signals.router)
 app.include_router(portfolio.router)
 app.include_router(market.router)
+app.include_router(health.router)
 
 
 @app.get("/api/health")

@@ -185,6 +185,31 @@
       .header-center{display:none}
       .mini-metrics{grid-template-columns:repeat(2,1fr)}
     }
+
+    /* ─── Tab nav ─── */
+    .tab-nav{display:flex;gap:6px;border-bottom:1px solid var(--border);padding:0 4px}
+    .tab-btn{background:transparent;border:none;color:var(--label);font-size:12px;font-weight:600;letter-spacing:1.5px;padding:12px 20px;cursor:pointer;border-bottom:2px solid transparent;display:flex;align-items:center;gap:8px;transition:all .2s;position:relative}
+    .tab-btn:hover{color:var(--text)}
+    .tab-btn.active{color:var(--cyan);border-bottom-color:var(--cyan);text-shadow:0 0 12px rgba(56,189,248,.4)}
+    .tab-icon{font-size:14px}
+    .tab-badge{position:absolute;top:6px;right:6px;background:var(--red);color:#fff;font-size:9px;font-weight:700;width:14px;height:14px;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 0 8px var(--red);animation:blink 1.5s infinite}
+    .tab-panel{display:flex;flex-direction:column;gap:20px}
+
+    /* ─── Health tab ─── */
+    .kv-grid{display:grid;grid-template-columns:max-content 1fr;gap:8px 18px;font-family:var(--mono);font-size:11px}
+    .kv-grid .k{color:var(--label);text-transform:uppercase;letter-spacing:.5px}
+    .kv-grid .v{color:var(--text);text-align:right;word-break:break-all}
+    .kv-grid .v.good{color:var(--green)}
+    .kv-grid .v.warn{color:var(--amber)}
+    .kv-grid .v.bad{color:var(--red)}
+    .log-list{max-height:240px;overflow-y:auto;font-family:var(--mono);font-size:10.5px;line-height:1.55}
+    .log-list .log-line{padding:4px 6px;border-bottom:1px solid var(--border);color:var(--text);word-break:break-word}
+    .log-list .log-line.err{color:var(--red)}
+    .log-list .log-line.warn{color:var(--amber)}
+    .h-pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;letter-spacing:1px}
+    .h-pill.good{background:rgba(52,211,153,.15);color:var(--green);border:1px solid rgba(52,211,153,.3)}
+    .h-pill.bad{background:rgba(248,113,113,.15);color:var(--red);border:1px solid rgba(248,113,113,.3)}
+    .h-pill.warn{background:rgba(251,191,36,.15);color:var(--amber);border:1px solid rgba(251,191,36,.3)}
   </style>
 </head>
 <body>
@@ -243,6 +268,19 @@
 </header>
 
 <main class="z1">
+
+  <!-- ── Tab Navigation ── -->
+  <div class="tab-nav">
+    <button class="tab-btn active" data-tab="trading" onclick="switchTab('trading')">
+      <span class="tab-icon">▣</span> TRADING
+    </button>
+    <button class="tab-btn" data-tab="health" onclick="switchTab('health')">
+      <span class="tab-icon">◉</span> SYSTEM HEALTH
+      <span class="tab-badge" id="health-badge" style="display:none">!</span>
+    </button>
+  </div>
+
+  <div id="tab-trading" class="tab-panel">
 
   <!-- ── Top Metrics (markets kept separate — currencies don't mix) ── -->
   <div class="metrics-row">
@@ -458,8 +496,8 @@
     </div>
   </div>
 
-  <!-- ── NYSE / NASDAQ Live Quotes ── -->
-  <div>
+  <!-- ── NYSE / NASDAQ Live Quotes (HIDDEN — NSE-only focus) ── -->
+  <div style="display:none">
     <div class="section-hdr">
       <span class="market-tag tag-nyse" style="margin-right:4px">NYSE/NASDAQ</span> Live Quotes
       <span style="font-size:9px;padding:2px 8px;border-radius:10px;background:rgba(255,170,0,.1);color:var(--amber);border:1px solid rgba(255,170,0,.3);margin-left:4px">SIGNALS VIA YFINANCE REAL-TIME</span>
@@ -510,6 +548,103 @@
       <div id="trades-pagination" style="display:flex;align-items:center;justify-content:center;gap:6px;margin-top:14px;flex-wrap:wrap"></div>
     </div>
   </div>
+
+  </div><!-- /tab-trading -->
+
+  <!-- ═════════════════════════════════════════════════════════════════════ -->
+  <!-- ── SYSTEM HEALTH TAB ── -->
+  <!-- ═════════════════════════════════════════════════════════════════════ -->
+  <div id="tab-health" class="tab-panel" style="display:none">
+
+    <!-- Top status row -->
+    <div class="metrics-row" style="grid-template-columns:repeat(4,1fr)">
+      <div class="metric-card" id="h-engine-card">
+        <div class="metric-label">◉ Engine</div>
+        <div class="metric-val" id="h-engine-val">—</div>
+        <div class="metric-sub" id="h-engine-sub">—</div>
+      </div>
+      <div class="metric-card" id="h-heartbeat-card">
+        <div class="metric-label">⚡ Heartbeat</div>
+        <div class="metric-val" id="h-heartbeat-val">—</div>
+        <div class="metric-sub" id="h-heartbeat-sub">—</div>
+      </div>
+      <div class="metric-card" id="h-mem-card">
+        <div class="metric-label">▤ VPS RAM</div>
+        <div class="metric-val" id="h-mem-val">—</div>
+        <div class="metric-sub" id="h-mem-sub">—</div>
+      </div>
+      <div class="metric-card" id="h-market-card">
+        <div class="metric-label">▤ Market</div>
+        <div class="metric-val" id="h-market-val">—</div>
+        <div class="metric-sub" id="h-market-sub">—</div>
+      </div>
+    </div>
+
+    <!-- Engine + Dashboard service detail -->
+    <div class="split-metrics">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Intraday Engine — systemd</span>
+          <span class="card-sub" id="h-int-sub">—</span>
+        </div>
+        <div id="h-intraday-detail" class="kv-grid"></div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Dashboard Service — systemd</span>
+          <span class="card-sub" id="h-dash-sub">—</span>
+        </div>
+        <div id="h-dashboard-detail" class="kv-grid"></div>
+      </div>
+    </div>
+
+    <!-- VPS + Pipeline -->
+    <div class="split-metrics">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">VPS Vitals</span>
+        </div>
+        <div id="h-vps-detail" class="kv-grid"></div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Pipeline Today</span>
+          <span class="card-sub" id="h-pipe-sub">—</span>
+        </div>
+        <div id="h-pipeline-detail" class="kv-grid"></div>
+      </div>
+    </div>
+
+    <!-- Errors / Warnings -->
+    <div class="split-metrics">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Recent ERRORS</span>
+          <span class="card-sub" id="h-err-count">0</span>
+        </div>
+        <div id="h-errors" class="log-list">
+          <div style="color:var(--muted);font-size:11px">none</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Recent WARNINGS</span>
+          <span class="card-sub" id="h-warn-count">0</span>
+        </div>
+        <div id="h-warnings" class="log-list">
+          <div style="color:var(--muted);font-size:11px">none</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">Health endpoint last refresh</span>
+        <span class="card-sub"><span id="h-last-refresh">—</span> · auto-refresh 10s</span>
+      </div>
+    </div>
+
+  </div><!-- /tab-health -->
 
 </main>
 
@@ -1135,6 +1270,170 @@ loadUsStocks();
 setInterval(refreshAll, 5*60*1000);
 setInterval(loadIndices, 60*1000);
 setInterval(loadUsStocks, 60*1000);
+
+// ─────────────────────────────────────────────────────────────────────────
+// ── TABS + SYSTEM HEALTH ────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  const panel = document.getElementById('tab-' + name);
+  if (panel) panel.style.display = 'flex';
+  const btn = document.querySelector(`.tab-btn[data-tab="${name}"]`);
+  if (btn) btn.classList.add('active');
+  if (name === 'health') loadHealth();
+}
+
+function fmtAge(sec) {
+  if (sec == null) return '—';
+  if (sec < 60) return Math.round(sec) + 's ago';
+  if (sec < 3600) return Math.round(sec/60) + 'm ago';
+  return (sec/3600).toFixed(1) + 'h ago';
+}
+
+function kv(label, value, cls) {
+  return `<div class="k">${label}</div><div class="v ${cls||''}">${value}</div>`;
+}
+
+function pill(text, cls) {
+  return `<span class="h-pill ${cls}">${text}</span>`;
+}
+
+async function loadHealth() {
+  try {
+    const h = await fetch(`${API}/api/health/full`).then(r => r.json());
+
+    // ── Top cards ──
+    const eng = h.services.intraday;
+    const engOk = eng.active === 'active';
+    document.getElementById('h-engine-val').innerHTML = pill(eng.active.toUpperCase(), engOk?'good':'bad');
+    document.getElementById('h-engine-val').className = 'metric-val';
+    document.getElementById('h-engine-sub').textContent =
+      `PID ${eng.pid||'-'} · ${eng.memory_mb||0} MB · ${eng.restarts} restarts`;
+
+    const hb = h.heartbeat;
+    const hbCls = hb.status === 'fresh' ? 'good' : hb.status === 'stale' ? 'warn' : 'bad';
+    document.getElementById('h-heartbeat-val').innerHTML = pill(hb.status.toUpperCase(), hbCls);
+    document.getElementById('h-heartbeat-sub').textContent =
+      hb.exists ? `${fmtAge(hb.age_seconds)}` : 'no heartbeat file';
+
+    const memPct = h.vps.mem_used_pct;
+    const memCls = memPct < 70 ? 'good' : memPct < 85 ? 'warn' : 'bad';
+    document.getElementById('h-mem-val').innerHTML =
+      `<span class="${memCls === 'good' ? 'text-green' : memCls === 'warn' ? 'text-amber' : 'text-red'}">${memPct}%</span>`;
+    document.getElementById('h-mem-sub').textContent =
+      `${h.vps.mem_used_mb}/${h.vps.mem_total_mb} MB · swap ${h.vps.swap_used_mb||0} MB`;
+
+    const mk = h.market;
+    document.getElementById('h-market-val').innerHTML =
+      pill(mk.is_open ? 'OPEN' : 'CLOSED', mk.is_open ? 'good' : 'warn');
+    document.getElementById('h-market-sub').textContent = `${mk.weekday} · ${mk.now_ist.split(' ')[1]} IST`;
+
+    // ── Intraday systemd detail ──
+    const intDet = document.getElementById('h-intraday-detail');
+    intDet.innerHTML =
+      kv('Active', eng.active, engOk?'good':'bad') +
+      kv('Enabled', eng.enabled) +
+      kv('Memory', `${eng.memory_mb} MB`) +
+      kv('PID', eng.pid || '—') +
+      kv('Restarts', eng.restarts, eng.restarts > 3 ? 'warn' : 'good') +
+      kv('Last result', eng.last_result || '—') +
+      kv('Started', (eng.started_at || '—').slice(0, 28));
+
+    const dash = h.services.dashboard;
+    const dashOk = dash.active === 'active';
+    document.getElementById('h-dashboard-detail').innerHTML =
+      kv('Active', dash.active, dashOk?'good':'bad') +
+      kv('Enabled', dash.enabled) +
+      kv('Memory', `${dash.memory_mb} MB`) +
+      kv('PID', dash.pid || '—') +
+      kv('Restarts', dash.restarts, dash.restarts > 3 ? 'warn' : 'good') +
+      kv('Started', (dash.started_at || '—').slice(0, 28));
+
+    // ── VPS vitals ──
+    const v = h.vps;
+    document.getElementById('h-vps-detail').innerHTML =
+      kv('Hostname', v.hostname) +
+      kv('Uptime', (v.uptime_hours || 0).toFixed(1) + ' hours') +
+      kv('Load 1/5/15', `${v.load_1m||0} / ${v.load_5m||0} / ${v.load_15m||0}`) +
+      kv('RAM used', `${v.mem_used_mb}/${v.mem_total_mb} MB (${v.mem_used_pct}%)`,
+         memCls) +
+      kv('RAM available', `${v.mem_available_mb} MB`) +
+      kv('Swap', `${v.swap_used_mb||0}/${v.swap_total_mb||0} MB`) +
+      kv('Disk free', `${v.disk_free_gb}/${v.disk_total_gb} GB (${(100-v.disk_used_pct).toFixed(1)}% free)`,
+         v.disk_used_pct > 85 ? 'warn' : 'good');
+
+    // ── Pipeline ──
+    const log = h.log;
+    const lat = log.latency_samples || {};
+    document.getElementById('h-pipeline-detail').innerHTML =
+      kv('Universe size', log.universe_size || '—') +
+      kv('Opens today', log.today_opens) +
+      kv('Closes today', log.today_closes) +
+      kv('SL hits', log.today_sl_hits, log.today_sl_hits > 5 ? 'warn' : '') +
+      kv('Target hits', log.today_target_hits, log.today_target_hits > 0 ? 'good' : '') +
+      kv('Force closes', log.today_force_closes) +
+      (lat.n ? (
+        kv('Latency samples', lat.n) +
+        kv('Latency avg', lat.avg_sec + 's', lat.avg_sec > 5 ? 'warn' : 'good') +
+        kv('Latency p95', lat.p95_sec + 's', lat.p95_sec > 10 ? 'bad' : lat.p95_sec > 5 ? 'warn' : 'good') +
+        kv('Latency max', lat.max_sec + 's') +
+        kv('Over 1s gate', lat.over_1s, lat.over_1s > 10 ? 'warn' : '')
+      ) : '') +
+      kv('Log size', `${log.size_kb} KB`);
+
+    // ── Errors + Warnings ──
+    const errs = log.errors_recent || [];
+    document.getElementById('h-err-count').textContent = errs.length;
+    document.getElementById('h-errors').innerHTML = errs.length
+      ? errs.map(e => `<div class="log-line err">${escapeHtml(e)}</div>`).join('')
+      : '<div style="color:var(--muted);font-size:11px">none</div>';
+
+    const warns = log.warnings_recent || [];
+    document.getElementById('h-warn-count').textContent = warns.length;
+    document.getElementById('h-warnings').innerHTML = warns.length
+      ? warns.map(w => `<div class="log-line warn">${escapeHtml(w)}</div>`).join('')
+      : '<div style="color:var(--muted);font-size:11px">none</div>';
+
+    document.getElementById('h-last-refresh').textContent =
+      new Date(h.ts).toLocaleTimeString();
+
+    // Trigger badge on the tab if unhealthy
+    const unhealthy = !engOk || hb.status === 'dead' || memPct > 90;
+    document.getElementById('health-badge').style.display = unhealthy ? 'flex' : 'none';
+
+  } catch (e) {
+    console.error('health load failed', e);
+    document.getElementById('h-engine-val').innerHTML =
+      `<span class="text-red">FETCH FAILED</span>`;
+    document.getElementById('h-engine-sub').textContent = String(e).slice(0, 80);
+  }
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
+
+// Poll health every 10 sec when the health tab is active; lightweight background poll every 60s for badge
+setInterval(() => {
+  const healthVisible = document.getElementById('tab-health').style.display !== 'none';
+  if (healthVisible) loadHealth();
+}, 10 * 1000);
+
+setInterval(() => {
+  // Lightweight background check just for the badge — once a minute
+  if (document.getElementById('tab-health').style.display === 'none') {
+    fetch(`${API}/api/health/full`).then(r => r.json()).then(h => {
+      const eng = h.services.intraday;
+      const hb = h.heartbeat;
+      const memPct = h.vps.mem_used_pct;
+      const unhealthy = eng.active !== 'active' || hb.status === 'dead' || memPct > 90;
+      document.getElementById('health-badge').style.display = unhealthy ? 'flex' : 'none';
+    }).catch(() => {});
+  }
+}, 60 * 1000);
 </script>
 </body>
 </html>
