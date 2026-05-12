@@ -9,6 +9,7 @@ Flow each tick:
     6. Send Telegram alert on every BUY/SELL/close event
 """
 from __future__ import annotations
+import gc
 import logging
 import time
 from datetime import datetime, timedelta
@@ -57,19 +58,25 @@ def _seconds_to_next_bar() -> float:
 
 
 def _fetch_intraday(symbol: str) -> pd.DataFrame | None:
-    """Fetch latest 5-min bars for a symbol."""
+    """Fetch latest 5-min bars for a symbol.
+
+    Uses Ticker.history() — never returns MultiIndex columns unlike yf.download(),
+    which avoids the 'DataFrame with multiple columns' RSI bug.
+    """
     try:
         import yfinance as yf
-        df = yf.download(symbol, period="5d", interval="5m",
-                         progress=False, auto_adjust=True)
-        if df.empty:
+        df = yf.Ticker(symbol).history(period="5d", interval="5m", auto_adjust=True)
+        if df is None or df.empty:
             return None
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = [c[0].lower() for c in df.columns]
+        # history() returns clean simple columns — just lowercase
+        df.columns = [c.lower() for c in df.columns]
+        keep = [c for c in ["open", "high", "low", "close", "volume"] if c in df.columns]
+        df = df[keep]
+        # Strip timezone — convert IST to naive
+        if df.index.tz is not None:
+            df.index = pd.to_datetime(df.index).tz_convert("Asia/Kolkata").tz_localize(None)
         else:
-            df.columns = [c.lower() for c in df.columns]
-        df.index = pd.to_datetime(df.index).tz_localize(None) \
-            if df.index.tz is None else pd.to_datetime(df.index).tz_convert("Asia/Kolkata").tz_localize(None)
+            df.index = pd.to_datetime(df.index)
         return df
     except Exception as e:
         logger.warning("fetch_intraday(%s): %s", symbol, e)
@@ -124,6 +131,14 @@ def _process_symbol(symbol: str, ensemble, portfolio_value: float) -> dict | Non
 
     # Regime gate
     if regime in ("HIGH_VOL", "UNKNOWN"):
+        signal = "HOLD"
+
+    # Confidence gate — must be confident enough to trade (matches alert threshold)
+    import os
+    SIGNAL_MIN_CONFIDENCE = float(os.getenv("SIGNAL_MIN_CONFIDENCE", "0.70"))
+    if signal in ("BUY", "SELL") and confidence < SIGNAL_MIN_CONFIDENCE:
+        logger.debug("%s: conf %.2f below floor %.2f — skipping %s",
+                     symbol, confidence, SIGNAL_MIN_CONFIDENCE, signal)
         signal = "HOLD"
 
     pos = get_position(symbol)
@@ -227,10 +242,10 @@ def run_intraday_session(symbols: list[str], ensemble, portfolio_value: float = 
             time.sleep(900)   # sleep 15 min then exit
             break
 
-        # Fix 3: parallel signal scanning — 8 workers, preserves architecture
+        # Fix 3: parallel signal scanning — 2 workers (low-RAM VPS safe)
         actions = 0
         prices = {}
-        with ThreadPoolExecutor(max_workers=8) as ex:
+        with ThreadPoolExecutor(max_workers=2) as ex:
             futures = {ex.submit(_process_symbol, sym, ensemble, portfolio_value): sym
                        for sym in symbols}
             for fut in as_completed(futures):
@@ -241,6 +256,9 @@ def run_intraday_session(symbols: list[str], ensemble, portfolio_value: float = 
                         actions += 1
                 except Exception as e:
                     logger.error("%s: %s", sym, e)
+
+        # Fix 4: reclaim DataFrame memory before sleeping — prevents OOM on small VPS
+        gc.collect()
 
         # Portfolio snapshot every tick
         state = snapshot_portfolio(prices)
