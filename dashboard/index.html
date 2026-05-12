@@ -1116,7 +1116,9 @@ async function loadEquity() {
     }
     const first=values[0], last=values[values.length-1], chg=last-first, pos=chg>=0;
     const lc=pos?'#00ff88':'#ff3366', gc=pos?'rgba(0,255,136,':'rgba(255,51,102,';
-    document.getElementById('eq-range').textContent=`${labels[0]} → ${labels[labels.length-1]}  (${data.length} snapshots)`;
+    if (sorted.length) {
+      document.getElementById('eq-range').textContent=`${labels[0]} → ${labels[labels.length-1]}  (${sorted.length} trades)`;
+    }
     const chgEl=document.getElementById('eq-change');
     chgEl.textContent=`${pos?'+':''}${fmtM(chg)}`; chgEl.style.color=lc;
     if (eqChart) eqChart.destroy();
@@ -1145,7 +1147,7 @@ async function loadEquity() {
             ticks:{color:'#718096',font:{family:'JetBrains Mono',size:10},padding:8,
               callback:v=>v>=100000?'₹'+(v/1000).toFixed(0)+'K':'₹'+Number(v).toLocaleString('en-IN',{maximumFractionDigits:0})},
             border:{display:false}}}}});
-  } catch(e) {}
+  } catch(e) { console.error('loadEquity failed:', e); }
 }
 
 // ── Watchlist ──────────────────────────────────────────────────────────────
@@ -1267,7 +1269,9 @@ function renderUsStocksGrid(stocks) {
 
 // ── Init ──────────────────────────────────────────────────────────────────
 async function refreshAll() {
-  await Promise.all([loadPortfolio(),loadTrades(),loadEquity()]);
+  // loadEquity reads _allTrades populated by loadTrades, so trades must finish first
+  await Promise.all([loadPortfolio(), loadTrades()]);
+  await loadEquity();
   await renderWatchlist();
 }
 refreshAll();
