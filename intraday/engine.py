@@ -13,7 +13,11 @@ import gc
 import logging
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 from zoneinfo import ZoneInfo
+
+# Heartbeat for watchdog — touched once per tick; cron alerts if stale
+HEARTBEAT_FILE = Path("/home/opc/health/intraday.heartbeat")
 
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -226,6 +230,13 @@ def run_intraday_session(symbols: list[str], ensemble, portfolio_value: float = 
 
     while True:
         now = _ist_now()
+
+        # Heartbeat — watchdog reads this file's mtime
+        try:
+            HEARTBEAT_FILE.parent.mkdir(parents=True, exist_ok=True)
+            HEARTBEAT_FILE.touch()
+        except Exception:
+            pass  # never let heartbeat I/O kill the engine
 
         if not _market_open():
             print(f"  [{now.strftime('%H:%M')}] Market closed. Session ended.")

@@ -1,0 +1,30 @@
+[Unit]
+Description=NSE Intraday Trading Engine
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=opc
+Group=opc
+WorkingDirectory=/home/opc/app
+ExecStart=/usr/bin/python3 /home/opc/app/main.py intraday
+Restart=on-failure
+RestartSec=30
+StartLimitBurst=5
+StartLimitIntervalSec=600
+
+# Hard memory cap — engine gets killed before OOM-killer hits sshd
+MemoryMax=700M
+MemoryHigh=600M
+
+# Logs
+StandardOutput=append:/home/opc/logs/intraday.log
+StandardError=append:/home/opc/logs/intraday.log
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/home/opc/app/.env
+
+[Install]
+WantedBy=multi-user.target

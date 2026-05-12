@@ -1,0 +1,26 @@
+[Unit]
+Description=NSE Dashboard (FastAPI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=opc
+Group=opc
+WorkingDirectory=/home/opc/app
+ExecStart=/usr/bin/python3 /home/opc/app/main.py dashboard --host 0.0.0.0
+Restart=always
+RestartSec=15
+
+# Dashboard is lighter — 200 MB cap
+MemoryMax=300M
+MemoryHigh=250M
+
+StandardOutput=append:/home/opc/logs/dashboard.log
+StandardError=append:/home/opc/logs/dashboard.log
+
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/home/opc/app/.env
+
+[Install]
+WantedBy=multi-user.target
