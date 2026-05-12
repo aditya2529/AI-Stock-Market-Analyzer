@@ -133,8 +133,12 @@ def _process_symbol(symbol: str, ensemble, portfolio_value: float) -> dict | Non
         logger.warning("%s signal failed: %s", symbol, e)
         return None
 
-    # Regime gate
+    # Regime gate — directional: don't fight the trend on intraday 5-min bars
     if regime in ("HIGH_VOL", "UNKNOWN"):
+        signal = "HOLD"
+    elif regime == "TRENDING_DOWN" and signal == "BUY":
+        signal = "HOLD"
+    elif regime == "TRENDING_UP" and signal == "SELL":
         signal = "HOLD"
 
     # Confidence gate — must be confident enough to trade (matches alert threshold)
