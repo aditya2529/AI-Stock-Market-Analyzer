@@ -92,8 +92,8 @@ def _process_symbol(symbol: str, ensemble, portfolio_value: float) -> dict | Non
     from features.engineer import engineer_features
     from paper_trading.portfolio import get_position, get_cash
     from paper_trading.executor import try_open, try_close
-    from signals.risk import compute_stop_and_target
-    from config import INTRADAY_BUY_THRESHOLD, INTRADAY_SELL_THRESHOLD
+    from signals.risk import compute_stop_and_target, risk_reward_ratio
+    from config import INTRADAY_BUY_THRESHOLD, INTRADAY_SELL_THRESHOLD, BROKERAGE_PCT, SLIPPAGE_PCT
 
     df = _fetch_intraday(symbol)
     if df is None or len(df) < 30:
@@ -169,7 +169,12 @@ def _process_symbol(symbol: str, ensemble, portfolio_value: float) -> dict | Non
             return None
 
         atr = float(featured["atr"].iloc[-1])
-        stop_loss, target = compute_stop_and_target(current_price, atr, "BUY")
+        # Compute SL/TP from expected FILL price (after slippage+brokerage),
+        # not the signal price. Keeps advertised R:R matching actual R:R —
+        # otherwise slippage shrinks reward and widens risk, dropping R:R 2.0 -> ~1.0
+        slip_factor = 1.0 + BROKERAGE_PCT + SLIPPAGE_PCT
+        expected_fill = round(current_price * slip_factor, 2)
+        stop_loss, target = compute_stop_and_target(expected_fill, atr, "BUY")
         signal_row = {
             "signal": signal, "confidence": confidence,
             "regime": regime, "stop_loss": stop_loss, "target": target,
@@ -180,6 +185,13 @@ def _process_symbol(symbol: str, ensemble, portfolio_value: float) -> dict | Non
                 from signals.generator import generate_signal
                 alert_payload = generate_signal(symbol, featured, ensemble,
                                                 portfolio_value=portfolio_value)
+                # Override alert payload with the values actually used for the trade,
+                # so Telegram alert matches what the engine really did.
+                alert_payload["price"]       = expected_fill
+                alert_payload["stop_loss"]   = stop_loss
+                alert_payload["target"]      = target
+                alert_payload["risk_reward"] = risk_reward_ratio(expected_fill, stop_loss, target)
+                alert_payload["shares"]      = opened.get("shares", alert_payload.get("shares", 0))
                 from alerts.dispatcher import on_signal
                 on_signal(alert_payload)
             except Exception:
