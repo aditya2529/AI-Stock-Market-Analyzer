@@ -321,8 +321,8 @@
     </div>
   </div>
 
-  <!-- ── NSE Panel (hidden — top metrics already cover these numbers) ── -->
-  <div class="split-metrics" style="grid-template-columns:1fr;display:none">
+  <!-- ── NSE Panel — duplicates of top row hidden, P&L + Trades kept ── -->
+  <div class="split-metrics" style="grid-template-columns:1fr">
 
     <!-- NSE Panel -->
     <div class="market-panel">
@@ -332,13 +332,13 @@
         <span id="nse-mkt-badge" style="margin-left:auto;font-size:10px;color:var(--muted)"></span>
       </div>
       <div class="market-panel-body">
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px">
-          <div class="mini-card">
+        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px">
+          <div class="mini-card" style="display:none">
             <div class="metric-label">Portfolio ₹</div>
             <div class="mini-val text-cyan" id="nse-portfolio">—</div>
             <div class="metric-sub" id="nse-portfolio-sub">total value</div>
           </div>
-          <div class="mini-card">
+          <div class="mini-card" style="display:none">
             <div class="metric-label">Cash ₹</div>
             <div class="mini-val text-white" id="nse-cash">—</div>
             <div class="metric-sub" id="nse-cash-pct">—</div>
@@ -348,12 +348,12 @@
             <div class="mini-val" id="nse-pnl">—</div>
             <div class="metric-sub" id="nse-pnl-pct">—</div>
           </div>
-          <div class="mini-card">
+          <div class="mini-card" style="display:none">
             <div class="metric-label">Win Rate</div>
             <div class="mini-val text-green" id="nse-wr">—</div>
             <div class="metric-sub" id="nse-wr-sub">—</div>
           </div>
-          <div class="mini-card">
+          <div class="mini-card" style="display:none">
             <div class="metric-label">Open</div>
             <div class="mini-val text-cyan" id="nse-open">—</div>
             <div class="metric-sub">positions</div>
@@ -364,7 +364,8 @@
             <div class="metric-sub">closed</div>
           </div>
         </div>
-        <div style="height:80px"><canvas id="nse-eq-chart"></canvas></div>
+        <!-- small equity curve hidden — big NSE Equity Curve chart below has the same data -->
+        <div style="height:80px;display:none"><canvas id="nse-eq-chart"></canvas></div>
       </div>
     </div>
 
