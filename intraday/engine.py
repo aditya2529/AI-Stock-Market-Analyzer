@@ -61,16 +61,36 @@ def _seconds_to_next_bar() -> float:
     return max(0, INTRADAY_SIGNAL_INTERVAL * 60 - seconds_past)
 
 
+# TTL cache for _fetch_intraday — keyed on (symbol, 5-min bucket).
+# Repeated calls within the same 5-min bar reuse the same DataFrame; the
+# bucket key flips at the next bar boundary, naturally expiring stale data.
+# Q5 fix — eliminates redundant yfinance round-trips within a tick.
+_FETCH_CACHE: dict = {}
+
+
+def _fetch_bucket() -> int:
+    """Current 5-minute bucket (epoch_minutes // 5). Cache key component."""
+    return int(time.time()) // (INTRADAY_SIGNAL_INTERVAL * 60)
+
+
 def _fetch_intraday(symbol: str) -> pd.DataFrame | None:
     """Fetch latest 5-min bars for a symbol.
 
     Uses Ticker.history() — never returns MultiIndex columns unlike yf.download(),
     which avoids the 'DataFrame with multiple columns' RSI bug.
+
+    TTL-cached on (symbol, 5-min bucket): within a bar, calls are O(1) dict hits.
     """
+    bucket = _fetch_bucket()
+    cached = _FETCH_CACHE.get(symbol)
+    if cached is not None and cached[0] == bucket:
+        return cached[1]
+
     try:
         import yfinance as yf
         df = yf.Ticker(symbol).history(period="5d", interval="5m", auto_adjust=True)
         if df is None or df.empty:
+            _FETCH_CACHE[symbol] = (bucket, None)
             return None
         # history() returns clean simple columns — just lowercase
         df.columns = [c.lower() for c in df.columns]
@@ -81,6 +101,7 @@ def _fetch_intraday(symbol: str) -> pd.DataFrame | None:
             df.index = pd.to_datetime(df.index).tz_convert("Asia/Kolkata").tz_localize(None)
         else:
             df.index = pd.to_datetime(df.index)
+        _FETCH_CACHE[symbol] = (bucket, df)
         return df
     except Exception as e:
         logger.warning("fetch_intraday(%s): %s", symbol, e)
@@ -231,6 +252,7 @@ def run_intraday_session(symbols: list[str], ensemble, portfolio_value: float = 
     from alerts.dispatcher import on_portfolio_snapshot
 
     _sl_cooldown.clear()   # Fix 2: fresh cooldown each session
+    _FETCH_CACHE.clear()   # Q5: fresh fetch cache each session
     init_paper_tables()
     if get_config("cash") is None:
         set_cash(portfolio_value)
@@ -281,10 +303,12 @@ def run_intraday_session(symbols: list[str], ensemble, portfolio_value: float = 
             time.sleep(900)   # sleep 15 min then exit
             break
 
-        # Fix 3: parallel signal scanning — 2 workers (low-RAM VPS safe)
+        # Q5 fix: 8 workers (was 2). Per-tick yfinance fanout was bottlenecking
+        # at ~125-522s when only 2 threads served 50 symbols. yfinance is I/O
+        # bound; the extra threads barely move RAM/CPU.
         actions = 0
         prices = {}
-        with ThreadPoolExecutor(max_workers=2) as ex:
+        with ThreadPoolExecutor(max_workers=8) as ex:
             futures = {ex.submit(_process_symbol, sym, ensemble, portfolio_value): sym
                        for sym in symbols}
             for fut in as_completed(futures):
