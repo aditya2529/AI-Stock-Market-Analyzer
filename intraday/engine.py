@@ -254,6 +254,18 @@ def run_intraday_session(symbols: list[str], ensemble, portfolio_value: float = 
         except Exception:
             pass  # never let heartbeat I/O kill the engine
 
+        # If we started BEFORE market open today (weekday), wait — don't quit.
+        # Without this, a timer firing at 9:10 IST exits because market opens at 9:15.
+        if now.weekday() < 5:
+            open_today = now.replace(hour=9, minute=15, second=0, microsecond=0)
+            close_today = now.replace(hour=15, minute=30, second=0, microsecond=0)
+            if now < open_today:
+                wait = (open_today - now).total_seconds()
+                logger.info("Pre-market — sleeping %.0fs until 9:15 IST", wait)
+                print(f"  [{now.strftime('%H:%M')}] Pre-market — waiting {wait:.0f}s for 9:15 IST")
+                time.sleep(wait + 5)   # 5 sec safety margin
+                continue
+
         if not _market_open():
             print(f"  [{now.strftime('%H:%M')}] Market closed. Session ended.")
             break

@@ -3,8 +3,8 @@ Description=Start NSE Intraday Engine at 9:10 AM IST on weekdays
 Requires=nse-intraday.service
 
 [Timer]
-# 9:10 AM IST = 03:40 UTC. Mon-Fri only.
-OnCalendar=Mon..Fri 03:40:00 UTC
+# 9:15 AM IST = 03:45 UTC. Mon-Fri only.
+OnCalendar=Mon..Fri 03:45:00 UTC
 Persistent=false
 Unit=nse-intraday.service
 
