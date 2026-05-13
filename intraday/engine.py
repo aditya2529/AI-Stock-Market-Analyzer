@@ -141,6 +141,7 @@ def _process_symbol(symbol: str, ensemble, portfolio_value: float) -> dict | Non
                 logger.info("SL cooldown: %s blocked for rest of session", symbol)
             from alerts.dispatcher import on_trade_closed
             on_trade_closed(result)
+            result["_action"] = "closed"
             return result
 
     # Generate signal
@@ -155,39 +156,59 @@ def _process_symbol(symbol: str, ensemble, portfolio_value: float) -> dict | Non
         return None
 
     # Regime gate — directional: don't fight the trend on intraday 5-min bars
+    regime_blocked_this_signal = False
     if regime in ("HIGH_VOL", "UNKNOWN"):
+        if signal in ("BUY", "SELL"):
+            regime_blocked_this_signal = True
         signal = "HOLD"
     elif regime == "TRENDING_DOWN" and signal == "BUY":
+        regime_blocked_this_signal = True
         signal = "HOLD"
     elif regime == "TRENDING_UP" and signal == "SELL":
+        regime_blocked_this_signal = True
         signal = "HOLD"
 
     # Confidence gate — must be confident enough to trade (matches alert threshold)
     import os
     SIGNAL_MIN_CONFIDENCE = float(os.getenv("SIGNAL_MIN_CONFIDENCE", "0.70"))
+    conf_blocked_this_signal = False
     if signal in ("BUY", "SELL") and confidence < SIGNAL_MIN_CONFIDENCE:
-        logger.debug("%s: conf %.2f below floor %.2f — skipping %s",
-                     symbol, confidence, SIGNAL_MIN_CONFIDENCE, signal)
+        # Q6+observability: promoted from debug to info — this fires often and
+        # was previously invisible; the per-tick summary depends on seeing it.
+        logger.info("%s: conf %.2f below floor %.2f — skipping %s",
+                    symbol, confidence, SIGNAL_MIN_CONFIDENCE, signal)
+        conf_blocked_this_signal = True
         signal = "HOLD"
+
+    if regime_blocked_this_signal:
+        return {"_action": "regime_blocked", "symbol": symbol}
+    if conf_blocked_this_signal:
+        return {"_action": "conf_blocked", "symbol": symbol}
 
     pos = get_position(symbol)
 
-    if signal == "SELL" and pos:
-        result = try_close(symbol, current_price, "signal")
-        if result:
-            from alerts.dispatcher import on_trade_closed
-            on_trade_closed(result)
-        return result
+    if signal == "SELL":
+        if pos:
+            result = try_close(symbol, current_price, "signal")
+            if result:
+                from alerts.dispatcher import on_trade_closed
+                on_trade_closed(result)
+                result["_action"] = "closed"
+            return result
+        # Q6 fix: surface SELL signals that fire on no-position (long-only
+        # engine cannot act on these). Was silently dropped before.
+        logger.info("%s: SELL signal ignored (long-only engine, no open position)", symbol)
+        return {"_action": "sell_ignored_no_position", "symbol": symbol}
 
     if signal == "BUY" and pos is None:
         # Fix 2: block re-entry if symbol hit SL earlier today
         if symbol in _sl_cooldown:
-            logger.debug("SL cooldown active — skipping BUY for %s", symbol)
-            return None
+            logger.info("%s: SL cooldown active — skipping BUY", symbol)
+            return {"_action": "cooldown", "symbol": symbol}
         from paper_trading.portfolio import get_open_positions
         if len(get_open_positions()) >= INTRADAY_MAX_POSITIONS:
-            logger.debug("%s: max positions reached, skipping BUY", symbol)
-            return None
+            logger.info("%s: max positions reached, skipping BUY", symbol)
+            return {"_action": "max_pos", "symbol": symbol}
 
         atr = float(featured["atr"].iloc[-1])
         # Compute SL/TP from expected FILL price (after slippage+brokerage),
@@ -217,6 +238,7 @@ def _process_symbol(symbol: str, ensemble, portfolio_value: float) -> dict | Non
                 on_signal(alert_payload)
             except Exception:
                 pass
+            opened["_action"] = "opened"
         return opened
 
     return None
@@ -308,6 +330,13 @@ def run_intraday_session(symbols: list[str], ensemble, portfolio_value: float = 
         # bound; the extra threads barely move RAM/CPU.
         actions = 0
         prices = {}
+        # Observability (Phase 4): per-tick breakdown of why each symbol did or
+        # did not trade. Visible at INFO level once per tick.
+        tick_counts = {"opened": 0, "closed": 0,
+                       "regime_blocked": 0, "conf_blocked": 0,
+                       "cooldown": 0, "max_pos": 0,
+                       "sell_ignored_no_position": 0,
+                       "processed": 0, "errors": 0}
         with ThreadPoolExecutor(max_workers=8) as ex:
             futures = {ex.submit(_process_symbol, sym, ensemble, portfolio_value): sym
                        for sym in symbols}
@@ -315,10 +344,26 @@ def run_intraday_session(symbols: list[str], ensemble, portfolio_value: float = 
                 sym = futures[fut]
                 try:
                     result = fut.result(timeout=30)
+                    tick_counts["processed"] += 1
                     if result:
                         actions += 1
+                        a = result.get("_action") if isinstance(result, dict) else None
+                        if a in tick_counts:
+                            tick_counts[a] += 1
                 except Exception as e:
+                    tick_counts["errors"] += 1
                     logger.error("%s: %s", sym, e)
+
+        logger.info(
+            "Tick summary: processed=%d | regime_blocked=%d | conf_blocked=%d "
+            "| cooldown=%d | max_pos=%d | sell_ignored=%d | opened=%d | closed=%d"
+            "%s",
+            tick_counts["processed"], tick_counts["regime_blocked"],
+            tick_counts["conf_blocked"], tick_counts["cooldown"],
+            tick_counts["max_pos"], tick_counts["sell_ignored_no_position"],
+            tick_counts["opened"], tick_counts["closed"],
+            (f" | errors={tick_counts['errors']}" if tick_counts["errors"] else ""),
+        )
 
         # Fix 4: reclaim DataFrame memory before sleeping — prevents OOM on small VPS
         gc.collect()
