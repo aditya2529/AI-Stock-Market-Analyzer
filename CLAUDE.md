@@ -9,13 +9,40 @@ Automated EOD paper run (daily 15:35) + monthly retrain scheduled. Run `python m
 
 ---
 
-## Phase 1 Results (Backtest on RELIANCE.NS)
+## Phase 1 Results
+
+### Daily model (RELIANCE.NS, ensemble.pkl)
 | Gate | Result | Target |
 |------|--------|--------|
 | Sharpe Ratio | 3.68 | > 1.5 |
 | Win Rate | 74.1% | > 55% |
 | Max Drawdown | 4% | < 15% |
 | Profit Factor | 7.63 | > 1.3 |
+
+### Intraday model (TCS.NS, ensemble_intraday.pkl) — first run after Q1/Q3/Q4 audit fixes
+Vol-scaled labels (0.5σ rolling fwd-return), 18 intraday-aware features
+(incl. daily-reset VWAP/OBV, opening-range, mins-to-close, volume surge),
+walk-forward folds sized in bars (10 trading days, stepped 5) not months.
+Trained on 106,300 5-min bars across 25 NSE symbols, fit time 626s.
+See `backtest_intraday_report.json` for full per-fold detail.
+
+| Gate | Result | Target | Status |
+|------|--------|--------|--------|
+| Sharpe Ratio (chained) | 1.84 | > 1.5 | ✓ PASS |
+| Win Rate | 46.9% | > 55% | ✗ FAIL |
+| Max Drawdown | 1.0% | < 15% | ✓ PASS |
+| Profit Factor | 3.73 | > 1.3 | ✓ PASS |
+| Trades | 49 over 4 folds | — | (vs 0 in production Day 2) |
+
+Per-fold Sharpe ranges -0.23 to -1.96 — these are annualised on fold
+length and are statistically noisy with 8–18 trades per fold (see Known
+Issues: "Sharpe is unreliable when a fold has < 5 trades"). The chained
+trade-level Sharpe is the authoritative figure.
+
+Win-rate failing the gate while profit factor 3.73 passes means winners
+are ~3.7× larger than losers in rupees — the strategy makes money
+infrequently but cleanly. Tightening the confidence gate (currently 0.70)
+would raise win-rate at the cost of n_trades.
 
 ---
 
