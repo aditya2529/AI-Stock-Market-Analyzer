@@ -15,12 +15,23 @@ logger = logging.getLogger(__name__)
 
 _LABEL_IDX = {"BUY": 0, "HOLD": 1, "SELL": 2}
 
+# Q5 fix: cache shap.TreeExplainer per-booster to avoid the ~0.35s rebuild cost
+# on every signal call. Keyed by id(model) so swapping ensembles invalidates safely.
+_EXPLAINER_CACHE: dict = {}
+
+
+def _get_explainer(model):
+    key = id(model)
+    if key not in _EXPLAINER_CACHE:
+        _EXPLAINER_CACHE[key] = shap.TreeExplainer(model)
+    return _EXPLAINER_CACHE[key]
+
 
 def _shap_reasons(ensemble: Ensemble, df_row: pd.DataFrame, signal: str, top_n: int = 3) -> list[str]:
     """Return top-N human-readable SHAP reasons for the XGBoost signal layer decision."""
     feature_cols = [c for c in FEATURE_COLUMNS if c in df_row.columns]
     try:
-        explainer = shap.TreeExplainer(ensemble.signal_layer.model)
+        explainer = _get_explainer(ensemble.signal_layer.model)
         shap_values = explainer.shap_values(df_row[feature_cols])
         # shap_values shape: (n_classes, n_samples, n_features) or (n_samples, n_features) for binary
         cls_idx = _LABEL_IDX.get(signal, 1)
