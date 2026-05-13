@@ -26,15 +26,27 @@ SIGNAL_MAP = {"BUY": 1, "HOLD": 0, "SELL": -1}
 def make_labels(df: pd.DataFrame,
                 lookahead: int = None,
                 buy_threshold: float = None,
-                sell_threshold: float = None) -> pd.Series:
-    """Create forward-return labels: BUY / SELL / HOLD."""
+                sell_threshold: float = None,
+                vol_scaled: bool = False) -> pd.Series:
+    """Create forward-return labels: BUY / SELL / HOLD.
+
+    If vol_scaled=True (Q1 audit fix), threshold is 0.5 * rolling-sigma of
+    forward returns instead of a fixed pct. Anchors the cutoff above the
+    noise floor on intraday bars where the fixed 0.3% ~= 1 sigma is noise.
+    The fixed-threshold path is preserved for the daily model's calibration.
+    """
     la  = lookahead      if lookahead      is not None else LABEL_LOOKAHEAD
     bt  = buy_threshold  if buy_threshold  is not None else BUY_THRESHOLD
     st  = sell_threshold if sell_threshold is not None else SELL_THRESHOLD
     fwd_return = df["close"].shift(-la) / df["close"] - 1
     labels = pd.Series("HOLD", index=df.index)
-    labels[fwd_return >= bt] = "BUY"
-    labels[fwd_return <= st] = "SELL"
+    if vol_scaled:
+        sigma = fwd_return.rolling(500, min_periods=100).std()
+        labels[fwd_return >=  0.5 * sigma] = "BUY"
+        labels[fwd_return <= -0.5 * sigma] = "SELL"
+    else:
+        labels[fwd_return >= bt] = "BUY"
+        labels[fwd_return <= st] = "SELL"
     return labels
 
 
@@ -157,28 +169,48 @@ def run_walk_forward(df: pd.DataFrame, model_cls, model_kwargs: dict = None) -> 
     return {"folds": fold_results, "summary": summary}
 
 
-def run_walk_forward_pretrained(df: pd.DataFrame, ensemble) -> dict:
+def run_walk_forward_pretrained(df: pd.DataFrame, ensemble,
+                                intraday: bool = False) -> dict:
     """Walk-forward backtest using a pre-trained ensemble — fast, no per-fold retraining.
 
-    The ensemble was trained on 65K bars across 25 symbols. Here we split the test
-    symbol's data into temporal folds and run inference only. The regime gate still
-    applies — HIGH_VOL / UNKNOWN folds suppress signals.
+    The ensemble was trained on 65K bars across 25 symbols (daily) or on 5-min
+    bars when intraday=True. We split the test symbol's data into temporal folds
+    and run inference only. The regime gate still applies — HIGH_VOL / UNKNOWN
+    folds suppress signals.
 
     This is the correct approach when the model is trained on different stocks than
     the test symbol (no target leakage), and it completes in seconds not minutes.
+
+    Q3 audit fix: when intraday=True, fold boundaries are computed in bars not
+    months (5-min data only spans ~60 days per symbol; month-based folds yield
+    zero usable test windows).
     """
     dates = df.index
     fold_results = []
     all_trades, all_equity = [], []
 
     folds = []
-    test_start = dates[int(len(dates) * 0.75)]
-    for _ in range(WF_FOLDS):
-        test_end = test_start + relativedelta(months=WF_FOLD_MONTHS)
-        if test_end > dates[-1]:
-            break
-        folds.append((test_start, test_end))
-        test_start = test_start + relativedelta(months=WF_STEP_MONTHS)
+    if intraday:
+        # ~75 5-min bars per NSE trading day. 10 trading days per fold = 750 bars,
+        # stepped by 5 days = 375 bars. With ~4250 bars in 60 trading days, that
+        # gives us roughly 5 non-overlapping fold positions.
+        fold_bars = 75 * 10
+        step_bars = 75 * 5
+        start_i = int(len(dates) * 0.5)   # leave first 50% as warm-up reference
+        for _ in range(WF_FOLDS):
+            end_i = start_i + fold_bars
+            if end_i >= len(dates):
+                break
+            folds.append((dates[start_i], dates[end_i]))
+            start_i += step_bars
+    else:
+        test_start = dates[int(len(dates) * 0.75)]
+        for _ in range(WF_FOLDS):
+            test_end = test_start + relativedelta(months=WF_FOLD_MONTHS)
+            if test_end > dates[-1]:
+                break
+            folds.append((test_start, test_end))
+            test_start = test_start + relativedelta(months=WF_STEP_MONTHS)
 
     if not folds:
         raise ValueError("Not enough data for walk-forward folds.")

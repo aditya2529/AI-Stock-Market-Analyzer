@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 from pathlib import Path
-from config import RANDOM_STATE, MODELS_DIR, FEATURE_COLUMNS
+from config import RANDOM_STATE, MODELS_DIR, FEATURE_COLUMNS, INTRADAY_FEATURE_COLUMNS
 
 torch.manual_seed(RANDOM_STATE)
 
@@ -52,8 +52,14 @@ class SequenceLayer:
         y_seq = np.array(labels, dtype=np.int64) if y is not None else None
         return X_seq, y_seq
 
+    def _pick_columns(self, X: pd.DataFrame) -> list[str]:
+        """Q4 fix: same detection trick as SignalLayer — vwap_intraday in
+        the frame means engineer_features classified this as intraday data."""
+        cols_pref = INTRADAY_FEATURE_COLUMNS if "vwap_intraday" in X.columns else FEATURE_COLUMNS
+        return [c for c in cols_pref if c in X.columns]
+
     def fit(self, X: pd.DataFrame, y: pd.Series) -> "SequenceLayer":
-        self._feature_cols = [c for c in FEATURE_COLUMNS if c in X.columns]
+        self._feature_cols = self._pick_columns(X)
         Xv = X[self._feature_cols].values.astype(np.float32)
         yv = np.array([_LABEL_MAP.get(lbl, 1) for lbl in y.values], dtype=np.int64)
 

@@ -49,15 +49,20 @@ class Ensemble:
     def fit(self, df: pd.DataFrame,
             lookahead: int = None,
             buy_threshold: float = None,
-            sell_threshold: float = None) -> "Ensemble":
+            sell_threshold: float = None,
+            vol_scaled: bool = False) -> "Ensemble":
         """Train all layers on df (must have feature columns + OHLCV).
 
         Uses first 80% for training, last 20% for meta-model calibration.
         Lookahead/thresholds override config defaults (used for intraday mode).
+        vol_scaled=True (Q1 audit fix) anchors labels at 0.5x rolling sigma
+        instead of a fixed pct — required on 5-min bars where the fixed
+        threshold sits at the noise floor.
         """
         labels = make_labels(df, lookahead=lookahead,
                              buy_threshold=buy_threshold,
-                             sell_threshold=sell_threshold)
+                             sell_threshold=sell_threshold,
+                             vol_scaled=vol_scaled)
         valid = labels.notna()
         df_v = df[valid]
         labels_v = labels[valid]
@@ -189,6 +194,16 @@ class Ensemble:
 
         with open(path, "wb") as f:
             pickle.dump(self, f)
+
+        # Q7 fix: also export the XGBoost booster in UBJ format alongside the
+        # pickle. UBJ is version-portable across xgboost majors; pickle is not.
+        # If the VPS ever runs a different xgboost version, load_booster_ubj()
+        # can rebuild the signal layer without depending on pickle compatibility.
+        try:
+            ubj_path = path.with_suffix(".ubj")
+            self.signal_layer.model.get_booster().save_model(str(ubj_path))
+        except Exception as e:
+            logger.warning("UBJ export failed (pickle still saved): %s", e)
         return path
 
     @classmethod

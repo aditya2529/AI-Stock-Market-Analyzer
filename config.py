@@ -52,6 +52,23 @@ FEATURE_COLUMNS = [
     "nifty_return", "nifty_vs_ma20", "india_vix", "vix_zscore",
 ]
 
+# Q4 audit fix: intraday-specific column list. Drops cumulative VWAP/OBV
+# (broken on 5-min bars), period-20 features (too noisy at 5m), day_of_week
+# (constant within session), and macro forward-fill features that are
+# constant within day. Adds the intraday-aware features that engineer.py
+# already computes but were never wired into FEATURE_COLUMNS.
+INTRADAY_FEATURE_COLUMNS = [
+    "rsi", "macd", "macd_signal", "macd_hist", "atr",
+    "return_5", "return_10",
+    "volatility_10",
+    "hour_of_day", "minutes_to_close",
+    # Intraday-aware features computed in features/engineer.py
+    "vwap_intraday", "above_or", "below_or", "volume_surge",
+    "mins_since_open", "mins_to_close",
+    # Macro — kept but downsampled to 2 columns that vary intraday via ffill
+    "nifty_return", "vix_zscore",
+]
+
 # Model training
 LABEL_LOOKAHEAD = 5        # bars ahead to check for BUY/SELL label
 BUY_THRESHOLD = 0.005      # +0.5% move → BUY label (lowered to increase signal frequency)

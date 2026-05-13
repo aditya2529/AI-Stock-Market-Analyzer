@@ -110,10 +110,14 @@ def cmd_train(args):
     ensemble = Ensemble()
     if args.intraday:
         from config import INTRADAY_LOOKAHEAD, INTRADAY_BUY_THRESHOLD, INTRADAY_SELL_THRESHOLD
+        # Q1 fix: vol_scaled=True anchors labels at 0.5sigma of rolling fwd
+        # returns instead of fixed +/-0.3%, which on 5-min bars sits at the
+        # noise floor (mean abs return ~= 0.32%).
         ensemble.fit(combined,
                      lookahead=INTRADAY_LOOKAHEAD,
                      buy_threshold=INTRADAY_BUY_THRESHOLD,
-                     sell_threshold=INTRADAY_SELL_THRESHOLD)
+                     sell_threshold=INTRADAY_SELL_THRESHOLD,
+                     vol_scaled=True)
         try:
             path = ensemble.save(suffix="_intraday",
                                  validate_df=validate_df,
@@ -138,18 +142,27 @@ def cmd_backtest(args):
     from models.ensemble import Ensemble
     from backtesting.engine import run_walk_forward_pretrained
 
-    df = get_ohlcv(args.symbol, resolution=args.resolution)
+    # Q3 audit fix: --intraday loads the _intraday ensemble against 5-min data.
+    is_intraday = getattr(args, "intraday", False)
+    suffix = "_intraday" if is_intraday else ""
+    resolution = "5m" if is_intraday else args.resolution
+
+    df = get_ohlcv(args.symbol, resolution=resolution)
     featured = engineer_features(df)
-    print(f"Running walk-forward backtest on {args.symbol} ({len(featured)} bars) …\n")
+    print(f"Running walk-forward backtest on {args.symbol} ({len(featured)} bars, "
+          f"{resolution}{', intraday' if is_intraday else ''}) …\n")
 
     try:
-        ensemble = Ensemble.load()
-        print("  Using pre-trained ensemble (65K bars, 25 symbols).")
+        ensemble = Ensemble.load(suffix=suffix)
+        kind = "intraday (5-min, vol-scaled labels)" if is_intraday \
+            else "daily (65K bars, 25 symbols)"
+        print(f"  Using pre-trained ensemble — {kind}.")
     except FileNotFoundError:
-        print("No trained model found — run: python main.py train --all")
+        miss = "intraday" if is_intraday else "all"
+        print(f"No trained model found — run: python main.py train --{miss}")
         sys.exit(1)
 
-    results = run_walk_forward_pretrained(featured, ensemble)
+    results = run_walk_forward_pretrained(featured, ensemble, intraday=is_intraday)
 
     print("── Per-fold results ──────────────────────────────────────")
     for fold in results["folds"]:
@@ -183,8 +196,11 @@ def cmd_backtest(args):
 
     if args.save:
         import pathlib
-        out = pathlib.Path("backtest_report.json")
-        out.write_text(json.dumps(results, indent=2))
+        # Q3 fix: separate report file for intraday so the daily Sharpe 3.68
+        # number in backtest_report.json is preserved for reference.
+        fname = "backtest_intraday_report.json" if is_intraday else "backtest_report.json"
+        out = pathlib.Path(fname)
+        out.write_text(json.dumps(results, indent=2, default=str))
         print(f"\n  Full report saved to {out}")
 
 
@@ -387,6 +403,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_bt.add_argument("--symbol", default=DEFAULT_SYMBOLS[0])
     p_bt.add_argument("--resolution", default="1d")
     p_bt.add_argument("--save", action="store_true", help="Save JSON report")
+    p_bt.add_argument("--intraday", action="store_true",
+                      help="Backtest the _intraday ensemble on 5-min bars (Q3 audit fix)")
 
     # intraday
     p_intra = sub.add_parser("intraday", help="Run intraday paper trading (NSE 9:15 AM IST | NYSE 9:30 AM ET)")

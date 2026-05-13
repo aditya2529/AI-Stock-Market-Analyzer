@@ -5,7 +5,7 @@ import pandas as pd
 from pathlib import Path
 from xgboost import XGBClassifier
 from sklearn.preprocessing import LabelEncoder
-from config import RANDOM_STATE, MODELS_DIR, FEATURE_COLUMNS
+from config import RANDOM_STATE, MODELS_DIR, FEATURE_COLUMNS, INTRADAY_FEATURE_COLUMNS
 
 
 _LABEL_ORDER = ["BUY", "HOLD", "SELL"]
@@ -33,8 +33,15 @@ class SignalLayer:
         self.encoder.fit(_LABEL_ORDER)
         self._feature_cols = None
 
+    def _pick_columns(self, X: pd.DataFrame) -> list[str]:
+        """Q4 fix: pick intraday cols when the DataFrame carries
+        vwap_intraday (engineer_features added it because bars-per-day > 10),
+        otherwise daily cols. Keeps a single trained-feature list per model."""
+        cols_pref = INTRADAY_FEATURE_COLUMNS if "vwap_intraday" in X.columns else FEATURE_COLUMNS
+        return [c for c in cols_pref if c in X.columns]
+
     def fit(self, X: pd.DataFrame, y: pd.Series):
-        self._feature_cols = [c for c in FEATURE_COLUMNS if c in X.columns]
+        self._feature_cols = self._pick_columns(X)
         y_enc = self.encoder.transform(y)
         self.model.fit(X[self._feature_cols], y_enc,
                        eval_set=[(X[self._feature_cols], y_enc)],
@@ -42,13 +49,13 @@ class SignalLayer:
         return self
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:
-        cols = self._feature_cols or [c for c in FEATURE_COLUMNS if c in X.columns]
+        cols = self._feature_cols or self._pick_columns(X)
         y_enc = self.model.predict(X[cols])
         return self.encoder.inverse_transform(y_enc)
 
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
         """Returns array of shape (n, 3) — [P(BUY), P(HOLD), P(SELL)]."""
-        cols = self._feature_cols or [c for c in FEATURE_COLUMNS if c in X.columns]
+        cols = self._feature_cols or self._pick_columns(X)
         return self.model.predict_proba(X[cols])
 
     def save(self, name: str = "signal_layer.pkl"):

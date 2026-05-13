@@ -64,17 +64,44 @@ def compute_atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
     return tr.ewm(span=period, adjust=False).mean()
 
 
+def _is_intraday_index(idx) -> bool:
+    """Q4 fix: detect 5-min-style data so cumulative features can reset by date.
+    Heuristic: more than 10 bars per calendar date (NSE intraday gives 75)."""
+    try:
+        if not isinstance(idx, pd.DatetimeIndex) or len(idx) < 20:
+            return False
+        return float(pd.Series(idx.date).value_counts().median()) > 10
+    except Exception:
+        return False
+
+
 def compute_vwap(df: pd.DataFrame) -> pd.Series:
-    """Cumulative VWAP from the start of the series (daily reset not applicable here)."""
+    """VWAP that resets at each calendar date when input is intraday.
+
+    Q4 fix: the previous cumsum-from-series-start logic was meaningless on
+    5-min bars (year-long cumulative average converges and stops moving).
+    Daily-bar behaviour is unchanged.
+    """
     typical = (df["high"] + df["low"] + df["close"]) / 3
-    cumvol = df["volume"].cumsum()
-    cumtpv = (typical * df["volume"]).cumsum()
+    tpv = typical * df["volume"]
+    if _is_intraday_index(df.index):
+        date_key = pd.Series(df.index.date, index=df.index)
+        cumvol = df["volume"].groupby(date_key).cumsum()
+        cumtpv = tpv.groupby(date_key).cumsum()
+    else:
+        cumvol = df["volume"].cumsum()
+        cumtpv = tpv.cumsum()
     return cumtpv / (cumvol + 1e-9)
 
 
 def compute_obv(df: pd.DataFrame) -> pd.Series:
+    """OBV that resets at each calendar date when input is intraday (Q4 fix)."""
     direction = df["close"].diff().apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
-    return (direction * df["volume"]).cumsum()
+    signed_vol = direction * df["volume"]
+    if _is_intraday_index(df.index):
+        date_key = pd.Series(df.index.date, index=df.index)
+        return signed_vol.groupby(date_key).cumsum()
+    return signed_vol.cumsum()
 
 
 def compute_adx(df: pd.DataFrame, period: int = 14) -> pd.Series:
@@ -261,5 +288,15 @@ def engineer_features(df: pd.DataFrame, add_macro: bool = True) -> pd.DataFrame:
         bars_per_day = out.groupby(out.index.date).size().median()
         if bars_per_day > 10:   # more than 10 bars/day = intraday data
             out = compute_intraday_features(out)
+            # Q4 fix: drop warm-up rows where the intraday-aware features
+            # are NaN (volume_surge needs a 20-bar rolling window). Without
+            # this, the LSTM picks up NaN at the head of each symbol.
+            intraday_cols = [c for c in ["vwap_intraday", "volume_surge",
+                                          "or_high", "or_low",
+                                          "above_or", "below_or",
+                                          "mins_since_open", "mins_to_close"]
+                             if c in out.columns]
+            if intraday_cols:
+                out = out.dropna(subset=intraday_cols)
 
     return out
