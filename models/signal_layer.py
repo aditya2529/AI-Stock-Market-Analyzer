@@ -55,6 +55,13 @@ class SignalLayer:
         path = Path(MODELS_DIR) / name
         with open(path, "wb") as f:
             pickle.dump(self, f)
+        # Q7 fix: also export the booster in version-portable UBJ format.
+        # Pickle is xgboost-major-version-fragile; UBJ is forward/back compatible.
+        try:
+            booster_path = path.with_suffix(".ubj")
+            self.model.get_booster().save_model(str(booster_path))
+        except Exception:
+            pass  # never let UBJ export fail the primary pickle save
         return path
 
     @classmethod
