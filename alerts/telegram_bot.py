@@ -105,6 +105,41 @@ def format_portfolio_summary(state: dict) -> str:
     )
 
 
+def format_engine_pulse(state: dict) -> str:
+    """Format a periodic engine health pulse (every ~30 min during market hours)."""
+    now    = state.get("now", "—")
+    n_proc = state.get("symbols_processed", 0)
+    n_open = state.get("open_positions", 0)
+    new_t  = state.get("new_today", 0)
+    closed = state.get("closed_today", 0)
+    cash   = state.get("cash", 0)
+    total  = state.get("total", 0)
+    dd     = state.get("drawdown_pct", 0)
+    last_actions = state.get("last_tick_actions", 0)
+    ram_mb = state.get("ram_mb")
+    latency = state.get("last_tick_seconds")
+    extras = []
+    if ram_mb is not None:
+        extras.append(f"RAM: {ram_mb:.0f} MB")
+    if latency is not None:
+        extras.append(f"Tick: {latency:.0f}s")
+    extra_line = " | ".join(extras)
+    return (
+        f"🤖 <b>Engine Pulse — {now} IST</b>\n"
+        f"\n"
+        f"Processed:  {n_proc} symbols last tick\n"
+        f"Open:       {n_open}  |  New today: {new_t}  |  Closed today: {closed}\n"
+        f"Cash:       ₹{cash:>10,.0f}\n"
+        f"Total:      ₹{total:>10,.0f}\n"
+        f"Drawdown:   {dd:.2%}\n"
+        + (f"\n{extra_line}" if extra_line else "")
+    )
+
+
+def send_engine_pulse(state: dict) -> bool:
+    return send_message(format_engine_pulse(state))
+
+
 def send_signal_alert(payload: dict) -> bool:
     return send_message(format_signal_message(payload))
 

@@ -287,6 +287,10 @@ def run_intraday_session(symbols: list[str], ensemble, portfolio_value: float = 
     print(f"  Press Ctrl+C to stop early (open positions will remain open)\n")
 
     forced_closed = False
+    tick_count = 0                # Engine pulse: send Telegram every 6 ticks (30 min)
+    PULSE_EVERY_N_TICKS = 6
+    new_today = 0                  # counter — incremented on each opened position
+    closed_today = 0               # counter — incremented on each close
 
     while True:
         now = _ist_now()
@@ -401,6 +405,53 @@ def run_intraday_session(symbols: list[str], ensemble, portfolio_value: float = 
                   f"Total=₹{state['total_value']:,.0f}  "
                   f"DD={state['drawdown_pct']:.1%}  "
                   f"Actions={actions}")
+
+        # Per-day cumulative counters for the engine pulse
+        new_today    += tick_counts["opened"]
+        closed_today += tick_counts["closed"]
+        tick_count   += 1
+
+        # Engine pulse — Telegram heartbeat every PULSE_EVERY_N_TICKS ticks (~30 min).
+        # Lets you check status from phone without opening dashboard.
+        if tick_count % PULSE_EVERY_N_TICKS == 0:
+            try:
+                from alerts.telegram_bot import send_engine_pulse
+                from paper_trading.portfolio import get_open_positions as _gop
+                # Use NSE-only numbers if the NSE block above succeeded; otherwise fall back
+                pulse_cash  = state.get("cash", 0)
+                pulse_total = state.get("total_value", 0)
+                pulse_dd    = state.get("drawdown_pct", 0)
+                try:
+                    pulse_cash  = nse_cash       # type: ignore  # noqa
+                    pulse_total = nse_total      # type: ignore  # noqa
+                    pulse_dd    = nse_dd         # type: ignore  # noqa
+                except NameError:
+                    pass
+                # Optional RAM info — use psutil if available, else skip
+                ram_mb = None
+                try:
+                    import psutil
+                    ram_mb = psutil.Process().memory_info().rss / (1024 * 1024)
+                except Exception:
+                    try:
+                        import resource
+                        ram_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+                    except Exception:
+                        pass
+                send_engine_pulse({
+                    "now":                now.strftime("%H:%M"),
+                    "symbols_processed":  tick_counts["processed"],
+                    "open_positions":     len(_gop()),
+                    "new_today":          new_today,
+                    "closed_today":       closed_today,
+                    "cash":               pulse_cash,
+                    "total":              pulse_total,
+                    "drawdown_pct":       pulse_dd,
+                    "last_tick_actions":  actions,
+                    "ram_mb":             ram_mb,
+                })
+            except Exception as e:
+                logger.debug("engine pulse send failed: %s", e)
 
         # Sleep until next 5-min bar
         wait = _seconds_to_next_bar()
