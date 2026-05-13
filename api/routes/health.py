@@ -39,6 +39,15 @@ def _run(cmd: list[str], timeout: float = 3.0) -> str:
         return ""
 
 
+def _safe_int(value, default: int = 0) -> int:
+    """Parse systemd property values safely. systemd returns '[not set]',
+    'infinity', or empty strings for inactive services — never crash on those."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _systemd_state(unit: str) -> dict:
     """Return active/enabled state + restart count + last log line for a unit."""
     active = _run(["systemctl", "is-active", unit]) or "unknown"
@@ -55,10 +64,10 @@ def _systemd_state(unit: str) -> dict:
             k, v = line.split("=", 1)
             props[k] = v
 
-    mem_bytes = int(props.get("MemoryCurrent", "0") or 0)
-    pid = int(props.get("MainPID", "0") or 0)
+    mem_bytes = _safe_int(props.get("MemoryCurrent"))
+    pid = _safe_int(props.get("MainPID"))
     start_ts = props.get("ExecMainStartTimestamp", "")
-    n_restarts = int(props.get("NRestarts", "0") or 0)
+    n_restarts = _safe_int(props.get("NRestarts"))
     last_result = props.get("Result", "")
 
     return {
