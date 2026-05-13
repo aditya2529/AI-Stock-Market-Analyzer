@@ -299,14 +299,39 @@ def run_intraday_session(symbols: list[str], ensemble, portfolio_value: float = 
         # Fix 4: reclaim DataFrame memory before sleeping — prevents OOM on small VPS
         gc.collect()
 
-        # Portfolio snapshot every tick
+        # Portfolio snapshot every tick — keep DB-side combined log for the API,
+        # but PRINT only the NSE-only numbers (this engine never trades NYSE).
         state = snapshot_portfolio(prices)
-        print(f"  [{now.strftime('%H:%M')}] "
-              f"Cash=₹{state['cash']:,.0f}  "
-              f"OpenEq=₹{state['open_equity']:,.0f}  "
-              f"Total=₹{state['total_value']:,.0f}  "
-              f"DD={state['drawdown_pct']:.1%}  "
-              f"Actions={actions}")
+        try:
+            from paper_trading.portfolio import get_market_cash, get_open_positions
+            nse_cash = float(get_market_cash("nse"))
+            nse_init = float(get_config("nse_initial_cash", "100000"))
+            nse_pos = get_open_positions()
+            if not nse_pos.empty:
+                nse_pos = nse_pos[nse_pos["symbol"].str.endswith(".NS")]
+                nse_open_eq = float(sum(
+                    float(r["entry_price"]) * int(r["shares"])
+                    for _, r in nse_pos.iterrows()
+                ))
+            else:
+                nse_open_eq = 0.0
+            nse_total = nse_cash + nse_open_eq
+            nse_dd = (nse_init - nse_total) / nse_init if nse_init > 0 else 0.0
+            print(f"  [{now.strftime('%H:%M')}] [NSE] "
+                  f"Cash=₹{nse_cash:,.0f}  "
+                  f"OpenEq=₹{nse_open_eq:,.0f}  "
+                  f"Total=₹{nse_total:,.0f}  "
+                  f"DD={nse_dd:.2%}  "
+                  f"Actions={actions}")
+        except Exception as e:
+            # Never let printing crash the engine — fall back to combined
+            logger.debug("NSE-only snapshot print failed: %s", e)
+            print(f"  [{now.strftime('%H:%M')}] "
+                  f"Cash=₹{state['cash']:,.0f}  "
+                  f"OpenEq=₹{state['open_equity']:,.0f}  "
+                  f"Total=₹{state['total_value']:,.0f}  "
+                  f"DD={state['drawdown_pct']:.1%}  "
+                  f"Actions={actions}")
 
         # Sleep until next 5-min bar
         wait = _seconds_to_next_bar()
