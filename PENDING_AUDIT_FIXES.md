@@ -246,6 +246,43 @@ to confirm each trade fired an alert.
 
 ---
 
+## P9. Engine died silently at 10:10 IST after dispatching a BUY alert (Windows)
+
+**Symptom (May 14):** Engine (PID 7928) running fine, opened CIPLA.NS
+BUY at 10:10:04, log shows "Dispatching BUY alert for CIPLA.NS" — then
+log file freezes. No tick summaries for 25 minutes, until manual
+restart. Process gone from Task Manager.
+
+**Suspected root cause:** Unicode encoding error when writing emoji or
+₹ symbol to Windows console / log file. The Telegram message format
+includes `₹`, `🟢`, `🛡️`, `🎯` etc. Windows default code page is cp1252
+which cannot encode these — would raise `UnicodeEncodeError` if any
+code path tries to print/log the formatted message.
+
+Existing NSE-only tick print already uses `₹` and works, so the basic
+print() path is OK. The crash must be elsewhere — possibly inside a
+worker thread where stderr handling differs, or in `format_signal_message`
+when the engine internally logs the payload for any reason.
+
+**Proposed investigation:**
+1. Add `sys.stdout.reconfigure(encoding="utf-8", errors="replace")` and
+   same for stderr at the top of `main.py`. This force-encodes all
+   output to UTF-8 regardless of OS default.
+2. Set `PYTHONIOENCODING=utf-8` env var in `run-intraday.bat`.
+3. Wrap the engine's worker function in a top-level try/except that
+   logs `traceback.format_exc()` to a sidecar file — so even a fatal
+   exception in a thread is captured before the engine dies.
+
+**Severity:** Critical on Windows deployment. Engine ran 40 minutes
+before dying. Without supervision/restart, missing 5 hours of trading
+on a normal day. systemd-style auto-restart doesn't exist on Windows
+Task Scheduler — would need a watchdog batch loop.
+
+**Workaround in place:** None. User is manually monitoring engine
+liveness via Task Manager + log file mtime.
+
+---
+
 ## Notes for the audit team
 
 - Production today is running on the user's Windows laptop (8 GB RAM,
