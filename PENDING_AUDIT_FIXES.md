@@ -197,6 +197,55 @@ trading-frequency expectations.
 
 ---
 
+## P8. Silent try/except around alert dispatch hides failures
+
+**Location:** `intraday/engine.py` — the BUY-opened branch:
+
+```python
+opened = try_open(symbol, signal_row, current_price, get_cash())
+if opened:
+    try:
+        from signals.generator import generate_signal
+        alert_payload = generate_signal(...)
+        # override fields ...
+        from alerts.dispatcher import on_signal
+        on_signal(alert_payload)
+    except Exception:
+        pass        # ← swallows ALL errors silently
+```
+
+**Symptom (May 14):** CIPLA.NS BUY opened at 10:10 IST but no Telegram
+alert was received. Logs showed "Dispatching BUY alert for CIPLA.NS" —
+which means the engine's dispatcher was called. But user did not get
+the message in real-time. Manual replay of the exact payload sent
+successfully. Most likely cause was Telegram-client notification miss
+on phone (not our bug), but the bare `except: pass` means we'd never
+know if it WAS a real bug.
+
+**Proposed fix (3-line change):**
+
+```python
+except Exception as e:
+    logger.warning("Alert dispatch failed for %s: %s", symbol, e, exc_info=True)
+```
+
+Plus in `alerts/dispatcher.py:on_signal`, log the send result:
+
+```python
+tg_ok = telegram_bot.send_signal_alert(payload)
+em_ok = email_alert.send_signal_alert(payload)
+if not tg_ok:
+    logger.warning("Telegram send for %s returned False", sym)
+if not tg_ok and not em_ok:
+    logger.warning("All alert channels failed for %s %s", signal, sym)
+```
+
+**Severity:** Medium — affects observability + trust in the alerting
+pipeline. Without this fix, the user has to manually scroll Telegram
+to confirm each trade fired an alert.
+
+---
+
 ## Notes for the audit team
 
 - Production today is running on the user's Windows laptop (8 GB RAM,
