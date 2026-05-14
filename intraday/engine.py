@@ -12,7 +12,8 @@ from __future__ import annotations
 import gc
 import logging
 import time
-from datetime import datetime, timedelta
+import traceback
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -246,25 +247,49 @@ def _process_symbol(symbol: str, ensemble, portfolio_value: float) -> dict | Non
     return None
 
 
-def _force_close_all():
-    """Close every open position at market price — called at 3:15 PM."""
-    from paper_trading.portfolio import get_open_positions
-    from paper_trading.executor import try_close
-    from alerts.dispatcher import on_trade_closed
+def _force_close_all() -> bool:
+    """Close every open position at market price — called at 3:15 PM.
 
-    positions = get_open_positions()
-    if positions.empty:
-        return
+    P20: top-level try/except. Returns True on success, False on failure.
+    On failure the full traceback is written to a timestamped sidecar
+    file in ``logs/force_close_failure_*.log`` and an ERROR is emitted
+    via the logger. Callers must NOT mark forced_closed=True unless
+    this returned True; otherwise the persisted flag would lock the
+    engine out of retrying within the same session.
+    """
+    try:
+        from paper_trading.portfolio import get_open_positions
+        from paper_trading.executor import try_close
+        from alerts.dispatcher import on_trade_closed
 
-    logger.info("3:15 PM — force closing %d open positions", len(positions))
-    for _, pos in positions.iterrows():
-        sym = pos["symbol"]
-        df = _fetch_intraday(sym)
-        price = float(df["close"].iloc[-1]) if df is not None and not df.empty \
-            else float(pos["entry_price"])
-        result = try_close(sym, price, "force_close_eod")
-        if result:
-            on_trade_closed(result)
+        positions = get_open_positions()
+        if positions.empty:
+            return True
+
+        logger.info("3:15 PM — force closing %d open positions", len(positions))
+        for _, pos in positions.iterrows():
+            sym = pos["symbol"]
+            df = _fetch_intraday(sym)
+            price = float(df["close"].iloc[-1]) if df is not None and not df.empty \
+                else float(pos["entry_price"])
+            result = try_close(sym, price, "force_close_eod")
+            if result:
+                on_trade_closed(result)
+        return True
+    except Exception:
+        tb = traceback.format_exc()
+        sidecar = (
+            Path(__file__).parent.parent / "logs"
+            / f"force_close_failure_{datetime.now(IST).strftime('%Y%m%d_%H%M%S')}.log"
+        )
+        try:
+            sidecar.parent.mkdir(parents=True, exist_ok=True)
+            sidecar.write_text(tb, encoding="utf-8")
+            logger.error("P20: _force_close_all CRASHED — traceback in %s", sidecar)
+        except Exception as werr:
+            logger.error("P20: _force_close_all CRASHED, sidecar write also failed: %s\n%s",
+                         werr, tb)
+        return False
 
 
 def run_intraday_session(symbols: list[str], ensemble, portfolio_value: float = 100_000.0):
@@ -272,7 +297,10 @@ def run_intraday_session(symbols: list[str], ensemble, portfolio_value: float = 
     Main intraday loop. Runs every 5 minutes from 9:15 AM to 3:30 PM IST.
     Call this once at 9:15 AM — it blocks until market close.
     """
-    from paper_trading.portfolio import init_paper_tables, get_config, set_cash, set_config, snapshot_portfolio
+    from paper_trading.portfolio import (
+        init_paper_tables, get_config, set_cash, set_config,
+        snapshot_portfolio, get_open_positions,
+    )
     from alerts.dispatcher import on_portfolio_snapshot
 
     _sl_cooldown.clear()   # Fix 2: fresh cooldown each session
@@ -283,12 +311,40 @@ def run_intraday_session(symbols: list[str], ensemble, portfolio_value: float = 
         set_config("peak_value", portfolio_value)
         set_config("initial_cash", portfolio_value)
 
+    # P20: startup sanity check — if positions are open from a previous day
+    # and market is closed, force-close them and refuse to start a new
+    # session. Catches the "engine respawned after force-close window passed"
+    # case that left 4 positions stuck open on May 14.
+    open_pos = get_open_positions()
+    if not open_pos.empty:
+        latest_entry_utc = pd.to_datetime(open_pos["entry_time"].max())
+        latest_entry_ist = (latest_entry_utc + timedelta(hours=5, minutes=30)).date()
+        today_ist = _ist_now().date()
+        if latest_entry_ist < today_ist and not _market_open():
+            logger.error(
+                "P20: %d stale positions detected at startup (latest entry %s, "
+                "today %s). Market closed — force-closing and exiting.",
+                len(open_pos), latest_entry_ist, today_ist,
+            )
+            ok = _force_close_all()
+            if ok:
+                logger.error("P20: stale positions cleared. Refusing to start new "
+                             "session — re-run after manual review.")
+            else:
+                logger.error("P20: stale-position cleanup FAILED. See sidecar log. "
+                             "DO NOT auto-restart — investigate manually.")
+            return
+
+    today_key = f"forced_closed_{date.today().isoformat()}"
+    forced_closed = (get_config(today_key, "0") == "1")
+    if forced_closed:
+        logger.info("P20: force-close already completed for %s — skipping",
+                    date.today().isoformat())
+
     logger.info("Intraday session started | %d symbols | 5-min bars", len(symbols))
     print(f"\n  Intraday session running — {len(symbols)} symbols")
     print(f"  Signals every 5 min | Force close at 3:15 PM IST")
     print(f"  Press Ctrl+C to stop early (open positions will remain open)\n")
-
-    forced_closed = False
     tick_count = 0                # Engine pulse: send Telegram every 6 ticks (30 min)
     PULSE_EVERY_N_TICKS = 6
     new_today = 0                  # counter — incremented on each opened position
@@ -322,14 +378,22 @@ def run_intraday_session(symbols: list[str], ensemble, portfolio_value: float = 
 
         # Force close at 3:15 PM
         if _should_force_close() and not forced_closed:
-            _force_close_all()
-            forced_closed = True
-            prices = {}
-            state = snapshot_portfolio(prices)
-            on_portfolio_snapshot(state)
-            logger.info("Day complete. Waiting for market close…")
-            time.sleep(900)   # sleep 15 min then exit
-            break
+            ok = _force_close_all()
+            if ok:
+                # P20: persist the flag so a watchdog restart after this point
+                # does NOT re-run force-close in the same session.
+                set_config(today_key, "1")
+                forced_closed = True
+                prices = {}
+                state = snapshot_portfolio(prices)
+                on_portfolio_snapshot(state)
+                logger.info("Day complete. Waiting for market close…")
+                time.sleep(900)   # sleep 15 min then exit
+                break
+            else:
+                # _force_close_all wrote a sidecar; loop will retry on the next
+                # tick. Don't sleep 15min — we want the retry promptly.
+                logger.error("P20: force-close failed, will retry on next tick")
 
         # Q5 fix: 8 workers (was 2). Per-tick yfinance fanout was bottlenecking
         # at ~125-522s when only 2 threads served 50 symbols. yfinance is I/O
