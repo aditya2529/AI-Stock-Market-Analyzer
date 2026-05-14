@@ -287,6 +287,20 @@
 
   <div id="tab-trading" class="tab-panel">
 
+  <!-- ── Market Sentiment ── -->
+  <div class="card card-glow" id="sentiment-card" title="Combined view of NIFTY 50 + SENSEX + BANK NIFTY + India VIX. Tells you the overall market mood today."
+       style="padding:14px 18px;display:flex;align-items:center;gap:24px;flex-wrap:wrap">
+    <div>
+      <div class="card-title" style="margin-bottom:6px">MARKET SENTIMENT</div>
+      <div id="sentiment-verdict" style="font-family:var(--mono);font-size:24px;font-weight:700;letter-spacing:1px">—</div>
+    </div>
+    <div style="flex:1;display:flex;gap:16px;flex-wrap:wrap;font-family:var(--mono);font-size:11px">
+      <div><span style="color:var(--label)">AVG CHANGE</span> <span id="sentiment-avg" style="font-weight:700;margin-left:6px">—</span></div>
+      <div><span style="color:var(--label)">VIX</span> <span id="sentiment-vix" style="font-weight:700;margin-left:6px">—</span></div>
+      <div id="sentiment-note" style="color:var(--muted);font-style:italic">—</div>
+    </div>
+  </div>
+
   <!-- ── Top Metrics (NSE-only) ── -->
   <div class="metrics-row" style="grid-template-columns:repeat(4,1fr)">
     <div class="metric-card" style="border-color:rgba(56,189,248,.25)">
@@ -1219,7 +1233,7 @@ let _indicesData=[],_usStocksData=[];
 async function loadIndices() {
   try {
     const data=await fetch(`${API}/api/market/indices`).then(r=>r.json());
-    if (data.length){_indicesData=data;renderTicker();}
+    if (data.length){_indicesData=data;renderTicker();renderSentiment();}
   } catch(e){}
 }
 
@@ -1228,6 +1242,44 @@ async function loadUsStocks() {
     const data=await fetch(`${API}/api/market/us/stocks`).then(r=>r.json());
     if (data&&data.length){_usStocksData=data;renderUsStocksGrid(data);renderTicker();}
   } catch(e){}
+}
+
+function renderSentiment() {
+  // Compute from current _indicesData. NSE/BSE core indices drive sentiment.
+  const CORE = ['NIFTY 50', 'SENSEX', 'BANK NIFTY'];
+  const core = _indicesData.filter(i => CORE.includes(i.name));
+  if (!core.length) return;
+  const avgPct = core.reduce((s, i) => s + (i.change_pct || 0), 0) / core.length;
+  const vix = _indicesData.find(i => i.name === 'INDIA VIX');
+  const vixPct = vix ? vix.change_pct : 0;
+
+  let verdict, color, note;
+  if (avgPct > 0.002) {            // > 0.2%
+    verdict = '🟢 BULLISH'; color = 'var(--green)';
+    note = vixPct < 0 ? 'VIX falling — confident rally' : 'VIX rising — cautious uptick';
+  } else if (avgPct < -0.002) {    // < -0.2%
+    verdict = '🔴 BEARISH'; color = 'var(--red)';
+    note = vixPct > 0 ? 'VIX rising — fear-driven selloff' : 'VIX falling — orderly decline';
+  } else {
+    verdict = '⚪ FLAT'; color = 'var(--label)';
+    note = 'Market consolidating';
+  }
+
+  const sv = document.getElementById('sentiment-verdict');
+  if (sv) { sv.textContent = verdict; sv.style.color = color; }
+  const sa = document.getElementById('sentiment-avg');
+  if (sa) {
+    sa.textContent = (avgPct >= 0 ? '+' : '') + (avgPct * 100).toFixed(2) + '%';
+    sa.style.color = avgPct >= 0 ? 'var(--green)' : 'var(--red)';
+  }
+  const sx = document.getElementById('sentiment-vix');
+  if (sx && vix) {
+    const arrow = vixPct >= 0 ? '↑' : '↓';
+    sx.textContent = `${vix.price.toFixed(2)} ${arrow} ${(Math.abs(vixPct) * 100).toFixed(2)}%`;
+    sx.style.color = vixPct >= 0 ? 'var(--red)' : 'var(--green)';
+  }
+  const sn = document.getElementById('sentiment-note');
+  if (sn) sn.textContent = note;
 }
 
 function renderTicker() {
