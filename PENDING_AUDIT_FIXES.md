@@ -158,6 +158,45 @@ work cross-platform.
 
 ---
 
+## P7. Model is empirically too conservative — most signals are HOLD
+
+**Symptom (May 14, post-fix run on laptop, 0.65 threshold):**
+- Out of 50 symbols per tick, ~38 pass all gates (regime + confidence)
+  but the model still outputs HOLD for them.
+- Only ~10 symbols per tick produce BUY/SELL signals strong enough to
+  evaluate; of those, half clear 0.65 confidence.
+- Net result: 1 trade in first 35 minutes of trading. After lowering
+  threshold to 0.60, expected 5-10 trades over the rest of the day.
+- Backtest confirms this: 49 trades over 4 folds × ~10 trading days
+  = ~1.2 trades/day. The conservatism is by design (vol-scaled labels
+  + meta-model calibration).
+
+**Decision needed (NOT a code fix, a strategy choice):**
+
+1. **Accept it.** Backtest shows Sharpe 1.84, PF 3.73 with this cadence.
+   Few but clean trades. Don't change anything.
+2. **Loosen the label threshold from 0.5σ → 0.3σ** during retrain.
+   Model sees more bars as BUY/SELL → fires more signals in production.
+   Risk: re-introduces noise that vol-scaling was meant to remove.
+3. **Hybrid "soft BUY" tier.** Keep full-size trades at conf ≥ 0.70;
+   add quarter-size trades for conf 0.55-0.70. ~30 lines in
+   `intraday/engine.py` + `_position_size`. Spreads risk over more
+   positions. No retraining needed.
+
+**Recommended sequencing:**
+- Days 1-10 of paper trading: **collect data, change nothing.**
+- After 30+ live paper trades: compute realized win-rate and PF.
+- If win-rate ≥ 45% AND PF ≥ 1.5 → option 1 (keep as-is).
+- If win-rate < 40% but trade count adequate → option 2 (retrain looser).
+- If trade count too low to evaluate (< 1 trade/day average) → option 3
+  (add soft-BUY tier).
+
+**Severity:** Medium (strategic, not technical). Engine is functioning
+as designed; question is whether design matches user's intraday
+trading-frequency expectations.
+
+---
+
 ## Notes for the audit team
 
 - Production today is running on the user's Windows laptop (8 GB RAM,
