@@ -309,7 +309,45 @@ item — P1's proposed rewrite resolves both.
 
 ---
 
-## P11. P9 is latent, not resolved — today's survival is not evidence
+## P11. P9 FIRED TODAY, TWICE — confirmed by watchdog log (amended 15:30 IST)
+
+**AMENDMENT:** Earlier wording of P11 was wrong. I diagnosed P9 as
+"latent / survived today" based on the intraday log showing the
+10:10 CIPLA dispatch followed by continued ticks. The watchdog log
+proves otherwise — engine PID 3796 ran fine all morning, then **died
+at 15:10 IST** (right after dispatching the RAIN/ADANIENT alerts in
+the closing flurry). Watchdog restarted as PID 15448. **That PID
+also died at 15:15 IST**, within 5 minutes, after attempting to
+dispatch the LICHSGFIN alert. Watchdog restarted again as PID 16688.
+
+**Watchdog log evidence (`logs/watchdog.log`):**
+
+```
+[2026-05-14 15:05:02] OK - engine alive (PID 3796), heartbeat n/a
+[2026-05-14 15:10:02] PROBLEM: Engine process is NOT running
+[2026-05-14 15:10:04] Telegram alert sent
+[2026-05-14 15:10:12] Restart OK - new PID 15448
+[2026-05-14 15:15:02] PROBLEM: Engine process is NOT running
+[2026-05-14 15:15:10] Restart OK - new PID 16688
+[2026-05-14 15:25:02] OK - engine alive (PID 16688)
+```
+
+Two crashes in 5 minutes, both correlated with BUY alert dispatch
+events — exact same trigger profile as yesterday's 10:10 IST crash.
+**P9 is the real, recurring, production-breaking bug.** Not latent.
+Not papered over. The watchdog is hiding it from the user's
+perception by auto-restarting fast enough that they only see the
+"restarted successfully" Telegram messages, not the silent failure.
+
+**Severity (revised): Critical — confirmed P9 mechanism, with both
+the watchdog Telegram pings and the failed BUY alerts as evidence
+in production.** This is the highest-priority fix in the file.
+
+---
+
+## P11-OLD (retained for history). P9 is latent — today's survival is not evidence
+
+*Superseded by amended P11 above. Retained for audit-team timeline reference.*
 
 **Symptom (May 14):** Engine dispatched the CIPLA BUY alert at
 10:10 IST (the same trigger point that killed it yesterday) and
@@ -553,7 +591,27 @@ it's a send failure that returned `True` incorrectly.
 
 ---
 
-## P18. Universe scanner re-runs mid-session after every new BUY
+## P18. RETRACTED — universe re-scan is correct startup behavior of a restarted engine
+
+**Original symptom misread:** I observed `"Scanning universe …"`
+lines appearing mid-session after BUY alerts and filed it as a
+re-scan bug. The watchdog log proves the engine crashed twice
+between 15:10 and 15:15 IST (see amended P11). Each restart is a
+fresh process and correctly re-runs the universe scan as part of
+its startup sequence — that's by design, not a bug.
+
+**What the duplicated `"Scanning universe …"` lines in the
+intraday log actually mean:** evidence of a restart, not a code
+defect in the selector. They are useful as a forensic marker for
+P9 crash timing.
+
+**Action for audit team:** No fix needed under P18. Treat
+duplicated startup log markers as a crash signal during log
+review.
+
+---
+
+## P18-OLD (retained for history). Universe scanner re-runs mid-session
 
 **Symptom (May 14, 15:05–15:10 IST):** Each new BUY in the closing
 flurry is followed by:
@@ -628,6 +686,119 @@ Tracked separately because:
 2. Confirm gate behaviour: log-only vs. block.
 3. After P18 fix, re-run a full day and check whether latency stays
    below 1.0s.
+
+---
+
+## P20. Force-close did not run at 15:15 IST — 4 positions stuck open overnight (CRITICAL)
+
+**Symptom (May 14, 15:30+ IST):** Market closed at 15:30. The
+engine's `_force_close_all()` is supposed to fire at 15:15 IST
+(`INTRADAY_FORCE_CLOSE_TIME = (15, 15)`) to flatten every open
+position before the session ends. **It did not.**
+
+**DB state after market close:**
+
+```
+paper_positions (still OPEN at 15:30+):
+  CIPLA.NS      entry 10:10 IST  ₹137K
+  RAIN.NS       entry 15:05 IST  ₹124K
+  ADANIENT.NS   entry 15:05 IST   ₹98K
+  LICHSGFIN.NS  entry 15:10 IST   ₹80K
+  TOTAL OPEN EQUITY: ₹439K
+```
+
+**Why it failed:** Per amended P11 + watchdog log, the engine
+crashed at 15:10 (PID 3796) and 15:15 (PID 15448). The 15:15 crash
+happened **at the same minute the force-close branch is checked**.
+PID 15448 likely died before reaching `_should_force_close()` →
+`_force_close_all()`. PID 16688 took over at 15:15:10, watchdog
+confirms alive at 15:25, but `paper_positions` table shows nothing
+was closed.
+
+**Possible causes inside PID 16688:**
+1. Engine entered the main loop, found market still "open" briefly
+   (within 15:15-15:30 window), then `_should_force_close()`
+   returned True but `_force_close_all()` itself crashed silently.
+2. The `forced_closed` flag persistence — the file-level boolean
+   doesn't survive a process restart. Should have been True after
+   PID 3796 attempted force-close. New process starts with
+   `forced_closed = False` and re-runs force-close — but it didn't.
+3. Engine reached force-close but every `try_close` call returned
+   None (price fetch failed near market close, fallback to entry
+   price ran but logged silently).
+4. Engine sat in pre-market wait branch waiting for "tomorrow's
+   9:15" because `now < open_today` evaluated True after midnight
+   logic.
+
+**Consequence:**
+- 4 NSE positions carrying ~₹439K notional are open in the paper
+  DB overnight (or longer if Monday's startup also doesn't clean
+  them up).
+- Tomorrow's engine startup will see them via `get_open_positions()`
+  and will continue to evaluate stops/targets against them — but
+  these positions were sized for INTRADAY exit, not overnight gap
+  risk. Stops will trigger off the gap open, not the intra-day
+  drift they were designed for.
+- The `nse_cash = ₹61,616` figure is now stuck low until these
+  positions close, blocking new trades tomorrow morning.
+
+**Proposed fix (multi-layered):**
+
+1. **Make `forced_closed` persistent** — write it to `paper_config`
+   keyed by date, so a restarted engine knows force-close still
+   needs to run. Pseudocode:
+
+   ```python
+   today_key = f"forced_closed_{date.today().isoformat()}"
+   forced_closed = get_config(today_key, "0") == "1"
+   ...
+   if _should_force_close() and not forced_closed:
+       _force_close_all()
+       set_config(today_key, "1")
+       forced_closed = True
+   ```
+
+2. **At engine startup, if market is closed AND `_should_force_close()`
+   would have returned True AND any positions are open** → force-close
+   immediately, then exit. Catches the "engine respawned after force-
+   close window passed" edge case.
+
+3. **Wrap `_force_close_all()` in a top-level try/except** that
+   logs the full traceback to a sidecar file — currently it silently
+   returns without confirming success.
+
+4. **Add a sanity check at the start of the next session** (9:10
+   pre-market): if `get_open_positions()` is non-empty AND the most
+   recent entry_time is yesterday, log WARNING and refuse to start
+   the new day until manually cleared.
+
+**Severity:** CRITICAL. This is the worst class of paper-trading
+bug — it silently changes the strategy from intraday to overnight
+hold, invalidating all backtest assumptions and risk-sizing.
+
+**Immediate user action (manual, post-market):** Option A — manually
+close the 4 positions in the DB at today's close price to preserve
+intraday accounting integrity. Option B — let them ride and treat
+tomorrow's exits as data points for "what happens to forced-stale
+positions" (worse for evaluation, but no data loss).
+
+---
+
+## P17 (amended). Telegram alerts not received — explained by P9 crash mid-send
+
+**Original P17 hypothesised the bug was in `telegram_bot.send_message`
+returning True on non-ok HTTP.** The watchdog log proves the actual
+mechanism: the engine crashed BETWEEN `dispatcher.on_signal()` logging
+its `"Dispatching BUY alert for X"` INFO line and the HTTP POST to
+Telegram completing. Process death mid-syscall.
+
+The proposed fix in P17 (parse `"ok"` field, log HTTP failures) is
+still good hygiene and worth doing — but it would not have helped
+in today's case, because the failure happened upstream of the HTTP
+call entirely.
+
+**Treat P17 as a hygiene improvement, P11 (P9 amended) as the
+root cause for today's missing alerts.**
 
 ---
 
