@@ -136,7 +136,12 @@ def open_position(symbol: str, entry_price: float, shares: int,
                   confidence: float = None, regime: str = None):
     market = _market_of(symbol)
     cash = get_market_cash(market)
-    cost = entry_price * shares
+    # P21: debit entry-side brokerage + slippage at the time of fill so the
+    # cash bucket matches what close_position accounts for in net P&L. Before
+    # this fix, fees were only subtracted on close — nse_cash accumulated a
+    # ~₹130/₹100K phantom credit per trade (~₹663 across the 5 May 14 trades).
+    from config import BROKERAGE_PCT, SLIPPAGE_PCT
+    cost = entry_price * shares * (1 + BROKERAGE_PCT + SLIPPAGE_PCT)
     if cost > cash:
         raise ValueError(f"Insufficient {market.upper()} cash: need {cost:.2f}, have {cash:.2f}")
     with get_connection() as conn:
