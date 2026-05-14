@@ -19,7 +19,15 @@ import argparse
 import json
 import logging
 import sys
-sys.stdout.reconfigure(encoding="utf-8")
+# P11/P9: belt-and-suspenders. PYTHONIOENCODING in run-intraday.bat is the
+# primary fix; this guards against environments where the env var is missing.
+# errors="replace" ensures a stray un-encodable char becomes "?" instead of
+# raising UnicodeEncodeError mid-tick and killing the engine.
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)

@@ -7,6 +7,10 @@ cd /d "D:\Projects\AI Stock Market Analyzer"
 REM Lower confidence floor — model is too cautious at 0.70; most signals fall 0.40-0.67
 set SIGNAL_MIN_CONFIDENCE=0.60
 
+REM P11/P9: force UTF-8 stdio so emoji and ₹ in alert payloads don't crash the
+REM engine on Windows (default cp1252 cannot encode them).
+set PYTHONIOENCODING=utf-8
+
 REM Log all output to a dated file so you can review what happened.
 set LOGDIR=D:\Projects\AI Stock Market Analyzer\logs
 if not exist "%LOGDIR%" mkdir "%LOGDIR%"

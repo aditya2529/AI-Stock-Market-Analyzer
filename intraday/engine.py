@@ -236,8 +236,10 @@ def _process_symbol(symbol: str, ensemble, portfolio_value: float) -> dict | Non
                 alert_payload["shares"]      = opened.get("shares", alert_payload.get("shares", 0))
                 from alerts.dispatcher import on_signal
                 on_signal(alert_payload)
-            except Exception:
-                pass
+            except Exception as e:
+                # P8/P11 fix: was `except Exception: pass`. Silent swallow hid
+                # the encoding crash that killed the engine on May 14.
+                logger.warning("%s: alert dispatch failed — %s", symbol, e, exc_info=True)
             opened["_action"] = "opened"
         return opened
 
@@ -399,12 +401,18 @@ def run_intraday_session(symbols: list[str], ensemble, portfolio_value: float = 
         except Exception as e:
             # Never let printing crash the engine — fall back to combined
             logger.debug("NSE-only snapshot print failed: %s", e)
-            print(f"  [{now.strftime('%H:%M')}] "
-                  f"Cash=₹{state['cash']:,.0f}  "
-                  f"OpenEq=₹{state['open_equity']:,.0f}  "
-                  f"Total=₹{state['total_value']:,.0f}  "
-                  f"DD={state['drawdown_pct']:.1%}  "
-                  f"Actions={actions}")
+            # P11/P9: the fallback print itself uses ₹ and can raise
+            # UnicodeEncodeError on cp1252 consoles. Wrap it so a print
+            # failure logs but cannot kill the main loop.
+            try:
+                print(f"  [{now.strftime('%H:%M')}] "
+                      f"Cash=₹{state['cash']:,.0f}  "
+                      f"OpenEq=₹{state['open_equity']:,.0f}  "
+                      f"Total=₹{state['total_value']:,.0f}  "
+                      f"DD={state['drawdown_pct']:.1%}  "
+                      f"Actions={actions}")
+            except Exception as pe:
+                logger.warning("fallback portfolio print failed: %s", pe)
 
         # Per-day cumulative counters for the engine pulse
         new_today    += tick_counts["opened"]
