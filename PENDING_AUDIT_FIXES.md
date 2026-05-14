@@ -281,6 +281,171 @@ Task Scheduler — would need a watchdog batch loop.
 **Workaround in place:** None. User is manually monitoring engine
 liveness via Task Manager + log file mtime.
 
+**Update (May 14, post-watchdog):** `NSE_Engine_Watchdog` task now runs
+every 5 min during market hours, PID-based liveness check, auto-restart
++ Telegram alert on death. P9 root cause still unfixed — watchdog
+papers over it.
+
+---
+
+## P10. P1 confirmed live with exact numbers (CIPLA, May 14)
+
+**Symptom (May 14, 10:10 IST):** CIPLA.NS BUY opened at ₹1417.34 ×
+97 shares = **₹1,37,482 = 22.1% of NSE cash (₹6,22,350)**. The 20%
+cap fired against the **combined** NSE+NYSE portfolio (₹760K × 20%
+≈ ₹152K), then was trimmed to ₹137K by the 95%-of-cash safety net.
+
+**Confirms P1 root cause:** `intraday/engine.py:224` passes
+`get_cash()` (combined) to `try_open(...)`. The 20%-of-portfolio cap
+in `executor.py:_position_size()` therefore allows a single NSE
+trade to exceed 1/INTRADAY_MAX_POSITIONS of NSE-only equity.
+
+**Live evidence > backtest evidence:** ADANIENT @ ₹1L gave 71%; CIPLA
+@ ₹5L gave 22%. The percentage scaled almost linearly with combined
+allocation, which is exactly the symptom predicted by P1.
+
+**Severity:** High (same as P1). This is observation, not a new fix
+item — P1's proposed rewrite resolves both.
+
+---
+
+## P11. P9 is latent, not resolved — today's survival is not evidence
+
+**Symptom (May 14):** Engine dispatched the CIPLA BUY alert at
+10:10 IST (the same trigger point that killed it yesterday) and
+stayed alive through to 11:45+ IST. No crash.
+
+**Why this does not close P9:**
+- No code change since yesterday's crash (`git log` confirms).
+- `PYTHONIOENCODING` is not set in `ops/windows/run-intraday.bat`.
+- The fallback `print()` at `intraday/engine.py:402–407` still uses
+  `₹` and has no `try/except` wrapper.
+- The bare `except Exception: pass` at `intraday/engine.py:239`
+  still hides any alert-path errors.
+
+The defect is non-deterministic (depends on stdout buffer state +
+which characters land in cp1252-encodable range at runtime). One
+good day is not a regression test.
+
+**Recommendation:** Audit team should not deprioritise P9 based on
+the May 14 survival. Apply the proposed `PYTHONIOENCODING=utf-8`
+fix + wrap the fallback print + replace the bare `pass`.
+
+**Severity:** Critical on Windows (unchanged from P9).
+
+---
+
+## P12. Heartbeat file is dead code on Windows
+
+**Location:** `intraday/engine.py:20`
+
+```python
+HEARTBEAT_FILE = Path("/home/opc/health/intraday.heartbeat")
+```
+
+On Windows the `mkdir(parents=True, exist_ok=True)` call fails
+(no `/home/opc` root) and is silently caught by the surrounding
+`try/except Exception: pass`. The file is never written.
+
+**Current impact:** Zero. The Windows `NSE_Engine_Watchdog` is
+PID-based and ignores this file.
+
+**Future risk:** If anyone ports the file-mtime watchdog from the
+Linux VPS to Windows (or just checks "is the heartbeat fresh?"
+from the dashboard), they will see a permanently stale path and
+trust silent dead code.
+
+**Proposed fix:** Make the path env-driven with a Windows-safe
+default:
+
+```python
+import os as _os
+HEARTBEAT_FILE = Path(_os.environ.get(
+    "HEARTBEAT_FILE",
+    str(Path(__file__).parent.parent / "logs" / "intraday.heartbeat")
+))
+```
+
+VPS continues to work by setting the env var; Windows writes to
+`logs/intraday.heartbeat` by default.
+
+**Severity:** Low. Cosmetic / latent. File under "tidy-up" not
+"reliability fix".
+
+---
+
+## P13. Universe scanner emits 3 ERROR-level lines on every startup
+
+**Symptom (May 14, every engine start):**
+
+```
+ERROR | HTTP Error 404: Quote not found for symbol: TATAMOTORS.NS
+ERROR | HTTP Error 404: Quote not found for symbol: PEL.NS
+ERROR | HTTP Error 404: Quote not found for symbol: LTIM.NS
+ERROR | 3 Failed downloads: ['TATAMOTORS.NS', 'LTIM.NS', 'PEL.NS']
+```
+
+**Cause:** All three have re-tickered or restructured on NSE:
+- `TATAMOTORS.NS` — demerged into commercial-vehicle / passenger-
+  vehicle entities; original ticker may need re-mapping.
+- `LTIM.NS` — Larsen & Toubro Infotech / LTIMindtree merger;
+  current ticker may differ.
+- `PEL.NS` — Piramal Enterprises restructuring; verify current
+  symbol.
+
+The scanner correctly drops them from the universe (selected
+50 symbols from 200 candidates), but logs 4 ERROR-level lines
+per startup which pollute the signal-to-noise on log scans.
+
+**Proposed fix:** Either (a) curate the seed list to remove
+delisted/re-tickered symbols, (b) downgrade scanner 404s from
+ERROR to WARNING, or (c) maintain a `symbol_aliases.json` that
+maps old→new tickers and rewrites on fetch.
+
+**Severity:** Low. Pure observability noise.
+
+---
+
+## P14. First successful target hit — baseline metric (info, no action)
+
+**Trade (May 14, 11:40 IST):**
+- Symbol: ADANIENT.NS
+- Entry: 10:10 IST (first trade of the session)
+- Exit reason: `target` (hit TP, not SL, not signal)
+- P&L: **+₹789.85 net (+1.11%)** on 97 shares
+- R:R held near 2.0 as advertised (slippage + brokerage within design)
+
+**Why this is filed:** First non-trivial target-hit closure of the
+live deployment. Useful baseline for the audit team to compare
+future trades against when evaluating the P7 30-trade-gate decision.
+
+**Severity:** Info only — no fix needed.
+
+---
+
+## P15. Dashboard total may show combined NSE+NYSE, not NSE-only
+
+**Observation:** `paper_portfolio_log.total_value` row at 11:45 IST
+shows ₹7,59,832 (combined cash + open eq across both markets).
+Engine's on-screen print uses an NSE-only snapshot (lines 379–398),
+but the **DB log is the authoritative source for `/api/portfolio`**.
+
+If the dashboard's Total card reads `paper_portfolio_log.total_value`,
+the user sees a combined number that mixes their NSE trading
+position with the static NYSE cash float. This makes drawdown,
+return %, and the "₹X invested" framing all wrong for NSE-only
+strategy evaluation.
+
+**Proposed investigation:**
+1. Confirm what `api/routes/portfolio.py:get_portfolio()` returns.
+2. If it returns the combined row, add an NSE-only / NYSE-only
+   split — either a new endpoint or a per-market view toggle on
+   the dashboard.
+
+**Severity:** Medium. Affects how the user reads their own
+performance. Not a trading-correctness bug; engine sizes and
+executes correctly per-market.
+
 ---
 
 ## Notes for the audit team
