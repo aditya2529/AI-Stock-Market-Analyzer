@@ -448,6 +448,189 @@ executes correctly per-market.
 
 ---
 
+## P16. NYSE cash bucket has an unexplained ~₹159K leak
+
+**Symptom (May 14, 15:10 IST):** `paper_config` table state:
+
+```
+nse_initial_cash = 500,000
+nyse_cash        = 258,950    ← should be ~100,000
+nse_cash         =  61,616    (consistent with 4 open NSE positions)
+initial_cash     = 600,000
+peak_value       = 759,832
+cash             = 100,000    ← legacy/unused column
+```
+
+NYSE has had **zero trades, ever** (`paper_trades` lifetime = 1 row,
+ADANIENT.NS today). NYSE cash should equal nyse_initial_cash (presumed
+₹100K). Instead it sits at ₹258,950 — ~₹159K of phantom credit.
+
+Combined snapshot: cash (₹320,566) + open_eq (₹439,266) = ₹759,832,
+vs. expected ₹600,000 baseline + ₹789 realized = ~₹600,789. Variance
+matches the NYSE-bucket inflation.
+
+**Suspected cause:** The May 14 NSE allocation bump (from ₹1L → ₹5L)
+likely went through a code path that credited the combined cash field
+or wrote to the wrong market bucket. `set_cash` / `set_market_cash`
+plumbing should be audited.
+
+**Severity:** Medium. Trading is unaffected — engine sizes against
+`nse_cash` correctly via `get_market_cash("nse")`. But `peak_value`,
+drawdown %, dashboard total, and any reporting that reads the
+combined or NYSE figures will be wrong until reconciled.
+
+**Verification step for audit team:**
+1. Check `git log -p paper_trading/portfolio.py` for any `set_cash` /
+   `set_market_cash` changes since the ₹5L bump.
+2. Trace whatever script bumped the NSE allocation — likely a
+   one-shot DB write that didn't zero/reset the NYSE bucket.
+3. Reconcile: nse_cash + nyse_cash + sum(open_position_costs)
+   should equal nse_initial_cash + nyse_initial_cash + sum(realized_pnl).
+
+---
+
+## P17. Telegram "Dispatching" logged but message not received
+
+**Symptom (May 14, 15:05–15:10 IST):** Engine opened 3 BUY positions
+(RAIN.NS, ADANIENT.NS re-entry, LICHSGFIN.NS) within 5 minutes. Log
+shows the dispatch step reached:
+
+```
+INFO | Dispatching BUY alert for RAIN.NS (conf=0.62)
+INFO | Dispatching BUY alert for ADANIENT.NS (conf=0.78)
+INFO | Dispatching BUY alert for LICHSGFIN.NS (conf=0.70)
+```
+
+User did **not** receive any of these three on Telegram. No
+`"All alert channels failed"` warning followed any of them — which
+means at least one channel returned `True`. Email is unconfigured
+(`ALERT_EMAIL_FROM=""`), so Telegram itself returned `True` despite
+the message never arriving.
+
+**Earlier alerts today were received** (CIPLA BUY at 10:10, ADANIENT
+target close at 11:40), so the bot token / chat_id are not broken
+account-wide.
+
+**Suspected causes (ranked):**
+1. `telegram_bot.send_signal_alert()` swallows HTTP non-2xx responses
+   and still returns `True` for some code paths (worth a code read).
+2. Telegram API rate-limit: 3 messages in 5 minutes after a long
+   quiet period can trigger silent throttling; the API may return
+   200 OK but defer/drop.
+3. Phone-side notification suppression (silent mode, focus filter)
+   — outside our control, but should still be visible in chat history.
+
+**Proposed fix (combines with P8):**
+
+```python
+# alerts/telegram_bot.py:send_message
+import json
+def send_message(text: str) -> bool:
+    ...
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            data = json.loads(body) if body else {}
+            ok = bool(data.get("ok"))
+            if not ok:
+                logger.warning("Telegram API non-ok: %s", body[:300])
+            return ok
+    except Exception as e:
+        logger.warning("Telegram send raised: %s", e)
+        return False
+```
+
+Currently the function likely doesn't parse the `"ok"` field of the
+Telegram response — fixing that gives true delivery confirmation.
+
+**Severity:** Medium-High. Alerts are a primary observability channel.
+Silent loss == user has to manually reconcile DB vs phone every day.
+
+**User verification step:** Check Telegram chat history (not just
+notifications) for the 3 alerts at ~15:05–15:10 IST. If they ARE in
+the chat history, it's phone-side suppression. If NOT in the chat,
+it's a send failure that returned `True` incorrectly.
+
+---
+
+## P18. Universe scanner re-runs mid-session after every new BUY
+
+**Symptom (May 14, 15:05–15:10 IST):** Each new BUY in the closing
+flurry is followed by:
+
+```
+INFO | Dispatching BUY alert for ADANIENT.NS (conf=0.78)
+INFO | Scanning universe — fetching previous day data for 200 symbols …
+ERROR | HTTP Error 404: ... TATAMOTORS.NS ...
+ERROR | $LTIM.NS: possibly delisted ...
+ERROR | $PEL.NS: possibly delisted ...
+```
+
+The universe selector is supposed to run **once at engine startup**
+(09:15 IST), pick the top-50 from 200 candidates, then operate on
+those 50 for the rest of the day. Today's log shows it firing
+**after every BUY in the last hour** — at least 3 times mid-session.
+
+**Side effects:**
+- 25–30 seconds of Yahoo Finance API calls per re-scan
+- 3 dead-ticker ERROR lines repeated each time (P13 amplified)
+- Almost certainly the cause of the new `Signal latency 1.53s exceeds
+  gate 1.0s` warnings (see P19) — scanner-latency leaking into the
+  tick budget
+- Burns rate-limit headroom on yfinance (we already have to back off
+  if Yahoo flags us)
+
+**Suspected trigger:** A code path that calls `select_universe()` or
+similar when a BUY opens — possibly tied to dashboard refresh,
+position-replacement logic, or a debug hook left in. Need a grep of
+all callers of the universe-scan entry point.
+
+**Proposed fix direction:** Universe selection should be guarded by
+a `_universe_selected_today` flag (set on first run, cleared at
+midnight or engine restart). Any non-startup caller should be either
+removed or made explicit via a config flag.
+
+**Severity:** High. Drives latency-gate breaches, error-log flood,
+and unnecessary API load. Not a correctness bug today, but the
+latency cost will get worse as universe grows.
+
+---
+
+## P19. Signal latency gate (1.0s) breached on multiple late-day ticks
+
+**Symptom (May 14, 15:05+ IST):**
+
+```
+WARNING | Signal latency 1.53s exceeds gate 1.0s
+INFO | Dispatching BUY alert for RAIN.NS (conf=0.62)
+WARNING | Signal latency 1.36s exceeds gate 1.0s
+INFO | Dispatching BUY alert for ADANIENT.NS (conf=0.78)
+```
+
+The gate exists somewhere in the signal pipeline (per the WARNING
+text — need to grep for "Signal latency"). Today is the first time
+it's tripped per log.
+
+**Likely root cause:** P18 (mid-session universe re-scan adds
+~30s of latency that bleeds into the next tick's signal generation).
+
+**Severity:** Medium, but expected to resolve when P18 is fixed.
+Tracked separately because:
+- If P18 fix doesn't drop latency below 1.0s, there's a second cause
+  worth finding.
+- The gate may currently be advisory-only (logs a warning but still
+  fires the alert). Audit team should confirm whether the gate ever
+  *blocks* a signal — if it does, breaches under P18 could be
+  killing trades silently.
+
+**Proposed investigation:**
+1. `grep -rn "Signal latency"` to locate the gate.
+2. Confirm gate behaviour: log-only vs. block.
+3. After P18 fix, re-run a full day and check whether latency stays
+   below 1.0s.
+
+---
+
 ## Notes for the audit team
 
 - Production today is running on the user's Windows laptop (8 GB RAM,
