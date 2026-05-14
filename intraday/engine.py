@@ -171,7 +171,13 @@ def _process_symbol(symbol: str, ensemble, portfolio_value: float) -> dict | Non
 
     # Confidence gate — must be confident enough to trade (matches alert threshold)
     import os
-    SIGNAL_MIN_CONFIDENCE = float(os.getenv("SIGNAL_MIN_CONFIDENCE", "0.70"))
+    # P3: default lowered from 0.70 to 0.60. The retrained intraday model
+    # emits calibrated probabilities in a narrower band (0.4-0.75) than the
+    # daily model (0.5-0.9). At 0.70 floor, 22-24/50 symbols were
+    # conf_blocked per tick on May 14 and 0 trades opened until the floor
+    # was manually overridden. run-intraday.bat also sets this env var to
+    # 0.60 explicitly; this change makes the default match production.
+    SIGNAL_MIN_CONFIDENCE = float(os.getenv("SIGNAL_MIN_CONFIDENCE", "0.60"))
     conf_blocked_this_signal = False
     if signal in ("BUY", "SELL") and confidence < SIGNAL_MIN_CONFIDENCE:
         # Q6+observability: promoted from debug to info — this fires often and
