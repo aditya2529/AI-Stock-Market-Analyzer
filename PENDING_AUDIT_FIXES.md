@@ -205,6 +205,8 @@ trading-frequency expectations.
 
 ## P8. Silent try/except around alert dispatch hides failures
 
+**Status:** FIXED in 55d6e69 — `except Exception: pass` at engine.py:239 replaced with `logger.warning("%s: alert dispatch failed — %s", symbol, e, exc_info=True)`. Bare-except no longer hides the encoding crash documented under P9/P11.
+
 **Location:** `intraday/engine.py` — the BUY-opened branch:
 
 ```python
