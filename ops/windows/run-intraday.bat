@@ -4,6 +4,9 @@ REM Engine handles its own pre-market wait + clean exit at 3:30 PM IST.
 
 cd /d "D:\Projects\AI Stock Market Analyzer"
 
+REM Lower confidence floor — model is too cautious at 0.70; most signals fall 0.40-0.67
+set SIGNAL_MIN_CONFIDENCE=0.65
+
 REM Log all output to a dated file so you can review what happened.
 set LOGDIR=D:\Projects\AI Stock Market Analyzer\logs
 if not exist "%LOGDIR%" mkdir "%LOGDIR%"
