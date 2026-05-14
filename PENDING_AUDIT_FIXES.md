@@ -802,6 +802,71 @@ root cause for today's missing alerts.**
 
 ---
 
+## P21. Entry-side brokerage/slippage debited in P&L but not in cash flow
+
+**Symptom (May 14, post-cleanup):** After closing today's 5 trades,
+`nse_cash` settled at ₹502,489.70 vs. the expected ₹501,826.51
+(₹500,000 initial + ₹1,826.51 reported net P&L). The cash bucket is
+**₹663.19 higher than the trade ledger says it should be**.
+
+**Root cause:** Asymmetric fee handling between open and close:
+
+```python
+# paper_trading/portfolio.py:open_position (line 139)
+cost = entry_price * shares          # NO fees applied to cash debit
+
+# paper_trading/portfolio.py:close_position (lines 164-168, 184)
+entry_cost_with_fees = entry_cost * (1 + BROKERAGE_PCT + SLIPPAGE_PCT)
+exit_proceeds_net    = gross_proceeds * (1 - BROKERAGE_PCT - SLIPPAGE_PCT)
+net_pnl              = exit_proceeds_net - entry_cost_with_fees
+# cash credited at close:
+set_market_cash(market, cash + exit_proceeds_net)
+```
+
+The reported `net_pnl` subtracts entry-side fees, but those fees
+never actually came out of cash. The cash bucket therefore grows by
+`exit_proceeds_net - entry_cost`, while the P&L line shows
+`exit_proceeds_net - entry_cost × (1+fees)`. Difference per trade =
+`entry_cost × (BROKERAGE_PCT + SLIPPAGE_PCT)`.
+
+**Verification (today's 5 trades, fees rate = 0.0013):**
+
+| Trade | Entry cost | Entry-side fees |
+|---|---:|---:|
+| ADANIENT (morning) | ₹70,886.07 | ₹92.15 |
+| CIPLA | ₹137,482.00 | ₹178.73 |
+| RAIN | ₹124,372.71 | ₹161.68 |
+| ADANIENT (pm) | ₹97,795.04 | ₹127.13 |
+| LICHSGFIN | ₹79,616.42 | ₹103.50 |
+| **Sum** | | **₹663.19** ✓ |
+
+Matches the unexplained excess to the rupee.
+
+**Proposed fix (one-line, in `open_position()`):**
+
+```python
+# Before
+cost = entry_price * shares
+
+# After
+cost = entry_price * shares * (1 + BROKERAGE_PCT + SLIPPAGE_PCT)
+```
+
+This makes the cash flow match the P&L formula — real brokers debit
+fees at order placement, not at close. Alternatively, fix the P&L
+formula to match the current cash flow by dropping the `× (1+fees)`
+on entry, but that under-reports true round-trip cost.
+
+**Severity:** Low. Cumulative drift is small (~₹130 per ₹100K
+notional trade). Across 30 trades = ~₹4K of phantom credit. Not
+trading-correctness, but affects the realism of paper P&L and any
+return-percentage reported to the user.
+
+**Acceptance test:** After fix, `nse_cash` after a complete trade
+cycle should equal `nse_initial_cash + sum(net_pnl)` to the rupee.
+
+---
+
 ## Notes for the audit team
 
 - Production today is running on the user's Windows laptop (8 GB RAM,
