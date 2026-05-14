@@ -112,7 +112,7 @@ def _fetch_intraday(symbol: str) -> pd.DataFrame | None:
 def _process_symbol(symbol: str, ensemble, portfolio_value: float) -> dict | None:
     """Fetch, engineer, generate signal, execute. Returns action taken or None."""
     from features.engineer import engineer_features
-    from paper_trading.portfolio import get_position, get_cash
+    from paper_trading.portfolio import get_position, get_market_cash, _market_of
     from paper_trading.executor import try_open, try_close
     from signals.risk import compute_stop_and_target, risk_reward_ratio
     from config import INTRADAY_BUY_THRESHOLD, INTRADAY_SELL_THRESHOLD, BROKERAGE_PCT, SLIPPAGE_PCT
@@ -222,7 +222,12 @@ def _process_symbol(symbol: str, ensemble, portfolio_value: float) -> dict | Non
             "signal": signal, "confidence": confidence,
             "regime": regime, "stop_loss": stop_loss, "target": target,
         }
-        opened = try_open(symbol, signal_row, current_price, get_cash())
+        # P1: pass per-market cash (NSE for .NS, NYSE otherwise) instead of
+        # combined cash. The 20%-of-portfolio cap inside executor._position_size
+        # then applies per-market, not combined — so a single NSE trade can no
+        # longer eat 71% of the NSE allocation just because NYSE cash inflates
+        # the combined pool.
+        opened = try_open(symbol, signal_row, current_price, get_market_cash(_market_of(symbol)))
         if opened:
             try:
                 from signals.generator import generate_signal
