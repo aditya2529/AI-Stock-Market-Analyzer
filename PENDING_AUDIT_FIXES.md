@@ -8,6 +8,8 @@ includes evidence and a proposed minimal fix.
 
 ## P1. Position sizer is not cash-aware (single trade eats 70% of capital)
 
+**Status:** FIXED in df135b2 — engine now passes `get_market_cash(_market_of(symbol))` to `try_open`, so the 20% cap in `executor._position_size` applies per-market. Verified: NSE ₹5L → 38 shares × ₹2625 = ₹99,750 (20.0%); NSE ₹1L → 7 shares × ₹2625 = ₹18,375 (18.4%, was 71% pre-fix).
+
 **Symptom (May 14):** First trade of the day — ADANIENT.NS BUY — opened
 27 shares @ ₹2625 = ~₹70,886. NSE allocation was ₹1,00,000. So one
 position consumed **71% of NSE capital**, leaving only ₹29K for the
@@ -92,6 +94,8 @@ to confirm the snapshot value at decision time vs. the actual count.
 
 ## P3. SIGNAL_MIN_CONFIDENCE floor of 0.70 is empirically too tight for the new intraday model
 
+**Status:** FIXED in 70ae9c5 — default lowered to 0.60 in `intraday/engine.py`. `run-intraday.bat` was already setting the env var to 0.60 explicitly; the code default now matches production.
+
 **Symptom (May 14, first 3 ticks after market open):**
 - Tick 1: 24/50 symbols `conf_blocked` (below 0.70 floor)
 - Tick 2: 24/50
@@ -133,6 +137,8 @@ config-file-watched threshold so live tuning is possible.
 ---
 
 ## P5. Position-size cap of 20% (in `_position_size`) is unaware of `INTRADAY_MAX_POSITIONS = 5`
+
+**Status:** FIXED in df135b2 — implicit. With per-market cash flowing into `_position_size`, the 20% cap now applies to NSE-only or NYSE-only equity, so 5 × 20% = 100% of per-market allocation is the natural ceiling. No standalone change required.
 
 Mathematically, if max 5 positions and each sized at 20% of portfolio,
 you can fully deploy capital with 5 trades — perfect. But if any
@@ -248,6 +254,8 @@ to confirm each trade fired an alert.
 
 ## P9. Engine died silently at 10:10 IST after dispatching a BUY alert (Windows)
 
+**Status:** FIXED in 55d6e69 — `PYTHONIOENCODING=utf-8` in `run-intraday.bat`, `sys.stdout/stderr.reconfigure(encoding="utf-8", errors="replace")` in `main.py`, fallback portfolio print wrapped in `try/except`, and the silent `except Exception: pass` at engine.py:239 replaced with `logger.warning(... exc_info=True)`. Manual reproduction: `python -c "import sys; print(sys.stdout.encoding)"` with the env var set now prints `utf-8`, and `₹ 1,00,000` round-trips through stdout.
+
 **Symptom (May 14):** Engine (PID 7928) running fine, opened CIPLA.NS
 BUY at 10:10:04, log shows "Dispatching BUY alert for CIPLA.NS" — then
 log file freezes. No tick summaries for 25 minutes, until manual
@@ -290,6 +298,8 @@ papers over it.
 
 ## P10. P1 confirmed live with exact numbers (CIPLA, May 14)
 
+**Status:** FIXED in df135b2 — root cause (P1) addressed; this entry is observation-only.
+
 **Symptom (May 14, 10:10 IST):** CIPLA.NS BUY opened at ₹1417.34 ×
 97 shares = **₹1,37,482 = 22.1% of NSE cash (₹6,22,350)**. The 20%
 cap fired against the **combined** NSE+NYSE portfolio (₹760K × 20%
@@ -310,6 +320,8 @@ item — P1's proposed rewrite resolves both.
 ---
 
 ## P11. P9 FIRED TODAY, TWICE — confirmed by watchdog log (amended 15:30 IST)
+
+**Status:** FIXED in 55d6e69 — same root cause as P9; see P9 status for the encoding-layer fixes.
 
 **AMENDMENT:** Earlier wording of P11 was wrong. I diagnosed P9 as
 "latent / survived today" based on the intraday log showing the
@@ -691,6 +703,13 @@ Tracked separately because:
 
 ## P20. Force-close did not run at 15:15 IST — 4 positions stuck open overnight (CRITICAL)
 
+**Status:** FIXED in 8a82b22 — three layers landed:
+1. `forced_closed_{YYYY-MM-DD}` is now persisted in `paper_config` after a successful close, so a watchdog restart inside the same session does not re-trigger force-close.
+2. Engine startup scans `paper_positions`: if any are open AND the most recent `entry_time` (UTC → IST) is older than today AND market is closed → calls `_force_close_all()` and exits, refusing to start a new session with stale positions.
+3. `_force_close_all()` is now wrapped in a top-level `try/except` that writes the full traceback to `logs/force_close_failure_YYYYMMDD_HHMMSS.log` and returns success/failure. Callers only persist the flag on `True`, so a partial close retries on the next tick instead of locking in a half-flat state.
+
+Verified: `set_config('forced_closed_2026-05-14','1') → get_config(...,'0') == '1'`. The 4 manual_force_close_p20 rows in `paper_trades` remain intact as the audit trail.
+
 **Symptom (May 14, 15:30+ IST):** Market closed at 15:30. The
 engine's `_force_close_all()` is supposed to fire at 15:15 IST
 (`INTRADAY_FORCE_CLOSE_TIME = (15, 15)`) to flatten every open
@@ -803,6 +822,8 @@ root cause for today's missing alerts.**
 ---
 
 ## P21. Entry-side brokerage/slippage debited in P&L but not in cash flow
+
+**Status:** FIXED in 3320995 — `paper_trading/portfolio.py:open_position` now debits `entry_price * shares * (1 + BROKERAGE_PCT + SLIPPAGE_PCT)` from the per-market cash bucket, mirroring `close_position`'s `entry_cost_with_fees` formula. Cash flow now matches reported net P&L; the ₹663.19 round-trip drift on May 14's 5 trades is structurally eliminated.
 
 **Symptom (May 14, post-cleanup):** After closing today's 5 trades,
 `nse_cash` settled at ₹502,489.70 vs. the expected ₹501,826.51
