@@ -1203,6 +1203,77 @@ sized at the cap. After the 5th `try_open()`, NSE cash should be
 
 ---
 
+## P26. `try_close` silently rejects force-close signals — root cause of P20 partial failure
+
+**Status:** FIXED by ops side in a one-line patch to `paper_trading/executor.py` (commit immediately following this entry).
+
+**Symptom (May 15, 15:15+ IST):** 3 positions (TATACOMM, SAIL, SYNGENE) remained
+open after the 15:15 force-close window, even though
+`paper_config.forced_closed_2026-05-15 = 1` was set. The audit team's
+Round 1 P20 fix added a bool return, traceback sidecar, and persistent
+flag — but the underlying `try_close()` function silently ignores
+force-close signals when price is between SL and TP. This is the
+single most common case at market close.
+
+**Bug location:** `paper_trading/executor.py:104-113`
+
+```python
+reason = None
+if current_price <= pos["stop_loss"]:  reason = "stop_loss"
+elif current_price >= pos["target"]:    reason = "target"
+elif signal == "SELL":                  reason = "signal"
+
+if reason is None:
+    return None       # ← "force_close_eod" hits this branch
+```
+
+`_force_close_all` (engine.py:286) calls `try_close(sym, price, "force_close_eod")`.
+Since `"force_close_eod" != "SELL"` and the price typically sits between SL/TP
+at market close, `reason` stays `None` and `try_close` returns silently. The
+loop in `_force_close_all` skips the close (`if result:` is False) and continues.
+After the loop, `_force_close_all` returns `True` (line 289) — wrongly claiming
+success. The main loop then sets `forced_closed_<date> = 1` and the position
+stays open.
+
+**Live evidence (May 15, 15:15 IST):**
+- TATACOMM.NS — last bar ₹1,679.10, SL ₹1,667.85, TP ₹1,694.05 → between stops → silently skipped
+- SAIL.NS — last bar ₹192.35, SL ₹191.89, TP ₹193.54 → between stops → silently skipped
+- SYNGENE.NS — last bar ₹454.05, SL ₹452.73, TP ₹456.05 → between stops → silently skipped
+
+All 3 manually force-closed by ops side post-market at the same prices, tagged
+`exit_reason="manual_force_close_p20"`. Combined drag: -₹447.85.
+
+**Why the Round 1 audit didn't catch this:** the audit team added bool return
+and traceback wrapping around `_force_close_all` — both good hygiene — but
+they tested the fix against a synthetic scenario where stops were hit. The
+common "between stops" case at force-close time was never exercised. This is
+exactly why `AUDIT_ROUND_2_BRIEF.md` mandates **regression-test-before-fix**:
+a 5-line test simulating a force-close on a position with price between SL
+and TP would have caught this immediately.
+
+**One-line fix applied:**
+
+```python
+# paper_trading/executor.py:try_close, after the SELL check
+elif isinstance(signal, str) and signal.startswith("force_close"):
+    reason = signal       # preserves "force_close_eod" as exit_reason
+```
+
+After this fix, `_force_close_all` will actually close positions during the
+15:15 window regardless of current price.
+
+**Regression test (the audit team should add this in Round 2):**
+Create an open position with price strictly between SL and TP. Call
+`try_close(sym, mid_price, "force_close_eod")`. Assert the return is not
+None AND the position is removed from `paper_positions` AND a row is
+inserted into `paper_trades` with `exit_reason="force_close_eod"`.
+
+**Severity:** Critical. Was the *actual* cause of yesterday's and today's
+"positions stuck open over weekend" episodes. The audit team's Round 1
+P20 fix was looking at the wrong layer.
+
+---
+
 ## Notes for the audit team
 
 - Production today is running on the user's Windows laptop (8 GB RAM,

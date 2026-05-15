@@ -108,6 +108,13 @@ def try_close(symbol: str, current_price: float, signal: str) -> Optional[dict]:
         reason = "target"
     elif signal == "SELL":
         reason = "signal"
+    elif isinstance(signal, str) and signal.startswith("force_close"):
+        # P26: force-close signals (e.g. "force_close_eod") must close
+        # unconditionally — even when price is between SL and TP. Prior
+        # bug: try_close silently rejected the close, _force_close_all
+        # still returned True, and forced_closed_<date> flag was set
+        # while positions stayed open over weekend.
+        reason = signal
 
     if reason is None:
         return None
