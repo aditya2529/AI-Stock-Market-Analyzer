@@ -14,8 +14,8 @@ So with no positions open and max_positions=5:
 With 4 positions open and 1 remaining slot:
     cap = remaining_cash / 1 * 0.80 = 80% of remaining.
 
-These tests monkey-patch ``paper_trading.portfolio.get_open_positions``
-so they never touch the live SQLite state.
+These tests monkey-patch ``paper_trading.executor.get_open_positions``
+(the bound reference inside executor) so they never touch the live SQLite state.
 """
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -52,7 +52,7 @@ def test_position_size_accepts_symbol_and_max_positions():
 
 def test_no_positions_open_caps_at_one_fifth_with_buffer(monkeypatch):
     """0 open NSE positions, max_positions=5 → cap = portfolio/5 * 0.80 = 16%."""
-    monkeypatch.setattr(portfolio, "get_open_positions", _empty_positions)
+    monkeypatch.setattr(executor, "get_open_positions", _empty_positions)
     # Wide SL so risk-budget gate doesn't bind — cap gate must decide.
     # entry=100, SL=1 → risk_per_share=99 → risk_amount=1000 → shares_by_risk=10
     # ...too narrow. Use entry=100, SL=99 → risk_per_share=1 → shares_by_risk=1000.
@@ -67,7 +67,7 @@ def test_no_positions_open_caps_at_one_fifth_with_buffer(monkeypatch):
 def test_fifth_slot_caps_at_80pct_of_remaining(monkeypatch):
     """4 NSE positions open, 1 slot remaining → cap = remaining * 0.80."""
     monkeypatch.setattr(
-        portfolio, "get_open_positions",
+        executor, "get_open_positions",
         lambda: _positions_for(["A.NS", "B.NS", "C.NS", "D.NS"]),
     )
     # remaining_slots = 5 - 4 = 1
@@ -82,7 +82,7 @@ def test_fifth_slot_caps_at_80pct_of_remaining(monkeypatch):
 def test_nyse_count_does_not_steal_nse_slots(monkeypatch):
     """Open NYSE positions must not consume NSE slot budget."""
     monkeypatch.setattr(
-        portfolio, "get_open_positions",
+        executor, "get_open_positions",
         lambda: _positions_for(["AAPL", "MSFT", "GOOG", "META"]),  # all NYSE
     )
     # No NSE positions → remaining_slots = 5 → cap = 100k/5*0.80 = 16k → 160 shares
@@ -109,7 +109,7 @@ def test_five_back_to_back_buys_leave_buffer(monkeypatch):
     def fake_positions():
         return _positions_for(open_syms) if open_syms else _empty_positions()
 
-    monkeypatch.setattr(portfolio, "get_open_positions", fake_positions)
+    monkeypatch.setattr(executor, "get_open_positions", fake_positions)
 
     cash = nse_initial
     entry = 100.0  # cheap symbol so cap binds, not risk-budget

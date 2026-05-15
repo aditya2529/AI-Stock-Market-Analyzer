@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from config import BROKERAGE_PCT, SLIPPAGE_PCT, MAX_RISK_PCT
+from config import BROKERAGE_PCT, SLIPPAGE_PCT, MAX_RISK_PCT, INTRADAY_MAX_POSITIONS
 from paper_trading.portfolio import (
     get_cash, get_market_cash, _market_of,
     get_position, open_position, close_position,
@@ -25,16 +25,42 @@ def _fill_price(price: float, side: str) -> float:
 
 
 def _position_size(entry_price: float, stop_loss: float,
-                   portfolio_value: float) -> int:
-    """Fixed-fraction position sizing: risk MAX_RISK_PCT of portfolio per trade."""
+                   portfolio_value: float,
+                   symbol: str = None,
+                   max_positions: int = INTRADAY_MAX_POSITIONS) -> int:
+    """Fixed-fraction position sizing with slot-aware concentration cap.
+
+    P25: when ``symbol`` is provided, the 20% concentration cap is replaced
+    by a slot-aware cap that reserves headroom for the other
+    INTRADAY_MAX_POSITIONS slots in the same market. So with 5 slots and
+    no open positions, the cap is ``portfolio_value / 5 * 0.80`` (= 16% of
+    per-market equity); with 4 already open it becomes
+    ``remaining_cash / 1 * 0.80`` (= 80% of what's left). The 20% legacy
+    cap is preserved for callers that don't pass a symbol.
+    """
     risk_per_share = abs(entry_price - stop_loss)
     if risk_per_share <= 0:
         return 0
     risk_amount = portfolio_value * MAX_RISK_PCT
-    shares = int(risk_amount / risk_per_share)
-    # Safety: cap position at 20% of portfolio to avoid concentration
-    max_shares = int(portfolio_value * 0.20 / entry_price)
-    return min(shares, max_shares)
+    shares_by_risk = int(risk_amount / risk_per_share)
+
+    if symbol is not None:
+        market = _market_of(symbol)
+        open_positions = get_open_positions()
+        if not open_positions.empty:
+            open_count = sum(
+                1 for _, r in open_positions.iterrows()
+                if _market_of(r["symbol"]) == market
+            )
+        else:
+            open_count = 0
+        remaining_slots = max(1, max_positions - open_count)
+        max_capital_per_trade = (portfolio_value / remaining_slots) * 0.80
+    else:
+        max_capital_per_trade = portfolio_value * 0.20
+
+    shares_by_cap = int(max_capital_per_trade / entry_price)
+    return max(0, min(shares_by_risk, shares_by_cap))
 
 
 def try_open(symbol: str, signal_row: dict, next_open: float,
@@ -62,7 +88,7 @@ def try_open(symbol: str, signal_row: dict, next_open: float,
         return None
 
     fill = _fill_price(next_open, "BUY")
-    shares = _position_size(fill, stop_loss, portfolio_value)
+    shares = _position_size(fill, stop_loss, portfolio_value, symbol=symbol)
     if shares <= 0:
         logger.warning("%s: position size = 0 (stop too close or cash too low)", symbol)
         return None
