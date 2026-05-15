@@ -1025,6 +1025,107 @@ held for one full 5-min bar without their awareness.
 
 ---
 
+## P24. ROOT CAUSE OF P9/P11 — Windows heap corruption (ntdll), NOT Unicode (CRITICAL)
+
+**Symptom (May 15, 09:15 + 09:25 IST):** Engine died TWICE this morning,
+each death within 6 seconds of a successful BUY trade opening, with
+the audit team's P9/P11 fix in place (PYTHONIOENCODING=utf-8,
+`sys.stdout.reconfigure`, wrapped fallback print, replaced bare
+`except: pass`).
+
+**Engine timeline:**
+```
+09:15:08  Engine opens TATACOMM.NS BUY (97 shares, conf 0.69)
+09:15:14  Engine PID dies   ← 6 seconds after BUY
+09:20:02  Watchdog detects dead, restarts → new PID 20048
+09:25:11  Engine opens ADANIPORTS.NS BUY (45 shares, conf 0.65)
+09:25:15  Engine PID 20048 dies  ← 4 seconds after BUY
+09:30:02  Watchdog detects dead, restarts → new PID 5884
+```
+
+**Smoking gun — Windows Application Event Log:**
+
+```
+Faulting application name: python.exe, version: 3.11.8150.1013
+Faulting module name:      ntdll.dll
+Exception code:            0xc0000374        ← STATUS_HEAP_CORRUPTION
+Fault offset:              0x0000000000117175
+```
+
+Both crashes show the identical signature: `0xc0000374` in `ntdll.dll`
+at offset `0x117175`. **This is heap corruption from a C extension,
+not a Python exception.** That is why:
+- No Python traceback in the intraday log
+- The P9/P11 PYTHONIOENCODING fix had zero effect (this is not an
+  encoding bug)
+- The crash is silent and instant (OS kills process; Python has no
+  opportunity to write stderr)
+- The intraday log just stops mid-tick
+
+**Why the original P9 hypothesis (Unicode) was plausible but wrong:**
+The original P9 entry hypothesised UnicodeEncodeError because the
+crash followed a BUY alert that contained ₹/emoji characters and the
+log went silent. Both observations are still true, but the *cause* is
+that the BUY path triggers heap corruption — not that emoji output
+crashed Python.
+
+**Suspect components (in the BUY path that doesn't run on HOLD ticks):**
+1. **SHAP TreeExplainer** — `signals/generator.py` cached the explainer
+   at module level (Q5 fix from May 13 audit). It's invoked on BUY
+   only. Threaded calls into shap+xgboost C code are a known
+   heap-corruption surface.
+2. **xgboost 3.2.0 + Python 3.13 + Windows** — xgboost's binary wheels
+   for 3.13 are recent; bug reports of heap issues on Windows exist
+   in the 3.x series.
+3. **urllib SSL handshake** in a worker thread — Telegram POST runs
+   on the same thread as the BUY logic; OpenSSL on Windows in a
+   ThreadPoolExecutor worker has a history of heap issues.
+4. **8-worker ThreadPoolExecutor** (Q5 fix bumped from 2 → 8). Higher
+   thread count amplifies any race condition in shared C state.
+
+**Reproducibility:** Crash fires on virtually every BUY trade. 100%
+correlation across 2 May 14 deaths + 2 May 15 deaths. Watchdog hides
+the user impact but the data is unambiguous.
+
+**Proposed investigation (audit team — fresh round):**
+
+1. **Cheapest first:** drop `max_workers=8` → `max_workers=1` in
+   `intraday/engine.py:344`. If crashes stop, race condition in C code
+   is the cause. ~30s code change, full day of evidence in one trading
+   session.
+
+2. **If single-thread still crashes:** comment out `generate_signal()`
+   call in the BUY-opened branch (engine.py:240) — replace with a
+   minimal payload built from `signal_row`. This bypasses SHAP entirely.
+   If crashes stop, SHAP TreeExplainer is the cause.
+
+3. **If SHAP is the culprit:** options are (a) move SHAP computation
+   to a separate process via `subprocess.run`, (b) downgrade xgboost
+   to a pre-3.x version, (c) skip SHAP reasons in alert payload.
+
+4. **If urllib is the culprit:** wrap Telegram send in a subprocess
+   call too; or switch to `requests` library which has different
+   SSL handling.
+
+**Severity:** CRITICAL. Engine is functionally unusable without the
+watchdog restart loop. Each death loses any ticks during the dead
+window (5-10 min) and any signals that should have fired in that
+window are gone. Eventually one of these crashes will hit at 15:15
+when the new restart can't complete force-close in time again (today's
+P20 fix mitigates but doesn't eliminate the risk).
+
+**Acceptance test:** Engine runs for an entire trading session
+(09:15 → 15:30 IST) opening at least 3 BUY trades without a single
+heap corruption death in the Windows Event Log.
+
+**Operational impact today (May 15):** P11 amendment from yesterday
+("CRITICAL — confirmed firing twice today") now confirmed *thrice
+more* — once each on May 14 and twice already on May 15 morning.
+This is a recurring production-breaking bug that the May 14 audit
+round did not actually fix.
+
+---
+
 ## Notes for the audit team
 
 - Production today is running on the user's Windows laptop (8 GB RAM,
