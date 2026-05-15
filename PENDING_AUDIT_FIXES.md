@@ -1027,6 +1027,12 @@ held for one full 5-min bar without their awareness.
 
 ## P24. ROOT CAUSE OF P9/P11 — Windows heap corruption (ntdll), NOT Unicode (CRITICAL)
 
+**Status:** FIXED in 2643b42 (test in 6f98d68) — two surgical changes:
+1. `alerts/telegram_bot.py` preloads `ssl.create_default_context()` at module import time and passes the shared context to every `urllib.request.urlopen` call, so worker threads never race on Windows `_load_windows_store_certs`.
+2. `data/database.py:load_ohlcv` opens its own `sqlite3.connect(..., check_same_thread=False)` per call and skips the `PRAGMA journal_mode=WAL` side effect on `get_connection()`. Removes the pandas `_fetchall_as_list` thread race captured in `logs/faulthandler.log`.
+
+Regression test `tests/test_p24_buy_path.py` (3 cases) FAILS on parent commit (915890d) — `_SSL_CONTEXT` import fails — and PASSES on 2643b42. Full suite 34/34 green.
+
 **Symptom (May 15, 09:15 + 09:25 IST):** Engine died TWICE this morning,
 each death within 6 seconds of a successful BUY trade opening, with
 the audit team's P9/P11 fix in place (PYTHONIOENCODING=utf-8,
@@ -1152,6 +1158,10 @@ round did not actually fix.
 
 ## P25. Position sizing is not slot-aware — 5 close-SL signals would fully deploy NSE cash
 
+**Status:** FIXED in dbdd077 (test in bf7d333) — `paper_trading/executor.py:_position_size` now accepts `symbol=` and `max_positions=` kwargs and, when a symbol is provided, replaces the flat 20% concentration cap with `(portfolio_value / remaining_slots) * 0.80`, counting only positions in the same market (NSE vs NYSE). `try_open` passes `symbol` through.
+
+Result: with 5 slots and no open positions, cap = 16% of per-market equity; the 5th cap-bound BUY leaves ≥5% of `nse_initial_cash` as buffer (encoded in `tests/test_p25_slot_aware_sizing.py::test_five_back_to_back_buys_leave_buffer`). Regression test (5 cases) FAILS on parent (TypeError — no `symbol` kwarg) and PASSES on dbdd077.
+
 **Symptom (May 15, 09:30 IST):** With 4 of 5 INTRADAY_MAX_POSITIONS
 slots filled, NSE cash deployed = ₹295,253 (58.8%). 1 slot remains.
 A 5th close-SL trade would size at the 20% cap of *current* NSE
@@ -1205,7 +1215,7 @@ sized at the cap. After the 5th `try_open()`, NSE cash should be
 
 ## P26. `try_close` silently rejects force-close signals — root cause of P20 partial failure
 
-**Status:** FIXED by ops side in a one-line patch to `paper_trading/executor.py` (commit immediately following this entry).
+**Status:** FIXED by ops side in a34497b (one-line patch to `paper_trading/executor.py`). Regression test added in 9970277 — `tests/test_p26_force_close.py` covers (a) the original bug (force-close between SL/TP), (b) priority preservation (SL still wins at the SL price), and (c) no over-broadening (HOLD between stops still returns None). Runs against a temp SQLite DB via `tmp_path` + monkeypatch on `data.database.DB_PATH`.
 
 **Symptom (May 15, 15:15+ IST):** 3 positions (TATACOMM, SAIL, SYNGENE) remained
 open after the 15:15 force-close window, even though
