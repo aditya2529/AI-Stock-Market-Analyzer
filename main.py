@@ -29,6 +29,27 @@ try:
 except Exception:
     pass
 
+# P24: capture C-level fault stacks. The real P9/P11 root cause is heap
+# corruption / access violation in a C extension (xgboost / SHAP / OpenSSL)
+# triggered by the BUY path. Python tracebacks don't surface because the OS
+# kills the process before Python can write stderr. faulthandler dumps the
+# C-stack at the moment of the fault into a sidecar log, giving the audit
+# team a real frame pointer to start from.
+import faulthandler
+import os as _os
+from pathlib import Path as _Path
+try:
+    _logs_dir = _Path(__file__).parent / "logs"
+    _logs_dir.mkdir(parents=True, exist_ok=True)
+    _faulthandler_file = open(_logs_dir / "faulthandler.log", "a", buffering=1)
+    _faulthandler_file.write(
+        f"\n--- faulthandler enabled at PID {_os.getpid()} ---\n"
+    )
+    faulthandler.enable(file=_faulthandler_file, all_threads=True)
+except Exception:
+    # Never block engine startup on observability setup.
+    pass
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 logger = logging.getLogger(__name__)
 
