@@ -1,11 +1,21 @@
 """Telegram alert sender using the Bot API (no polling — fire-and-forget)."""
 import logging
+import ssl
 import urllib.request
 import urllib.parse
 import json
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
 logger = logging.getLogger(__name__)
+
+# P24: Windows SSL cert store loading via _load_windows_store_certs is not
+# thread-safe. With 8 ThreadPool workers each calling urlopen on the BUY
+# path (signal alert + concurrent trade-closed alerts), the C-level cert
+# store iteration raced and corrupted the heap (STATUS_HEAP_CORRUPTION
+# 0xc0000374, ACCESS_VIOLATION 0xc0000005). Preload the default context
+# ONCE at import time — before any workers exist — so workers reuse the
+# already-loaded context and never hit _load_windows_store_certs again.
+_SSL_CONTEXT = ssl.create_default_context()
 
 
 def _is_configured() -> bool:
@@ -27,7 +37,7 @@ def send_message(text: str, parse_mode: str = "HTML") -> bool:
     try:
         req = urllib.request.Request(url, data=payload,
                                      headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=10, context=_SSL_CONTEXT) as resp:
             return resp.status == 200
     except Exception as e:
         logger.warning("Telegram send failed: %s", e)

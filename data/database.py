@@ -58,8 +58,20 @@ def load_ohlcv(symbol: str, resolution: str = "1d", limit: int = None) -> pd.Dat
     if limit:
         sql += " LIMIT ?"
         params.append(limit)
-    with get_connection() as conn:
+    # P24: open a dedicated SQLite connection per call with
+    # check_same_thread=False. The 8-worker ThreadPoolExecutor in
+    # intraday/engine.py concurrently called pd.read_sql_query against
+    # connections returned by get_connection() — and get_connection()
+    # additionally executes ``PRAGMA journal_mode=WAL`` on every open,
+    # which leaked C state across threads and triggered heap corruption
+    # in pandas's _fetchall_as_list (see logs/faulthandler.log). A bare
+    # sqlite3.connect with check_same_thread=False, no PRAGMA, and a
+    # finally-close keeps each thread's read path fully isolated.
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    try:
         df = pd.read_sql_query(sql, conn, params=params, parse_dates=["time"])
+    finally:
+        conn.close()
     df.set_index("time", inplace=True)
     return df
 
