@@ -1084,8 +1084,32 @@ crashed Python.
    thread count amplifies any race condition in shared C state.
 
 **Reproducibility:** Crash fires on virtually every BUY trade. 100%
-correlation across 2 May 14 deaths + 2 May 15 deaths. Watchdog hides
-the user impact but the data is unambiguous.
+correlation across 2 May 14 deaths + **4 May 15 deaths** (09:15, 09:25,
+09:35, 09:45). Watchdog hides the user impact but the data is
+unambiguous.
+
+**AMENDMENT (May 15, 09:48 IST) — second exit code observed:**
+
+```
+09:15:14  Exception 0xc0000374 (STATUS_HEAP_CORRUPTION)
+09:25:15  Exception 0xc0000374 (STATUS_HEAP_CORRUPTION)
+09:35:17  Exception 0xc0000005 (ACCESS_VIOLATION)   ← different!
+09:45:15  Exception 0xc0000374 (STATUS_HEAP_CORRUPTION)
+```
+
+The appearance of BOTH `0xc0000374` and `0xc0000005` strengthens
+the C-extension diagnosis: it's not one specific bug, it's general
+memory mishandling somewhere in the BUY-path C code. Likely
+candidates:
+- SHAP TreeExplainer is reading/writing past an array boundary
+- xgboost Booster object is being mutated concurrently from two
+  threads
+- urllib's OpenSSL backend is racing with the main thread's
+  Booster.predict
+
+A single specific bug would fire one signature consistently; two
+signatures from the same trigger point at "memory safety in C code
+that's being called from multiple threads."
 
 **Proposed investigation (audit team — fresh round):**
 
@@ -1123,6 +1147,59 @@ heap corruption death in the Windows Event Log.
 more* — once each on May 14 and twice already on May 15 morning.
 This is a recurring production-breaking bug that the May 14 audit
 round did not actually fix.
+
+---
+
+## P25. Position sizing is not slot-aware — 5 close-SL signals would fully deploy NSE cash
+
+**Symptom (May 15, 09:30 IST):** With 4 of 5 INTRADAY_MAX_POSITIONS
+slots filled, NSE cash deployed = ₹295,253 (58.8%). 1 slot remains.
+A 5th close-SL trade would size at the 20% cap of *current* NSE
+equity = ~₹100K but the `cash * 0.95` safety net would scale it
+down. After 5 trades on a tight-SL day, deployment could approach
+100% of NSE cash with zero reserve.
+
+**Current sizing logic** (`paper_trading/executor.py:_position_size`
++ `try_open`):
+
+```python
+# Gate 1: risk-budget
+shares_by_risk = int(portfolio_value * MAX_RISK_PCT / sl_distance)
+# Gate 2: 20% concentration cap
+shares_by_cap = int(portfolio_value * 0.20 / entry_price)
+shares = min(shares_by_risk, shares_by_cap)
+# Gate 3: 95% cash safety
+if fill * shares > available_cash:
+    shares = int(available_cash * 0.95 / fill)
+```
+
+**The missing logic:** the audit team's *originally proposed* P1 fix
+included `remaining_slots` accounting. The shipped fix dropped that:
+
+```python
+# Proposed but not shipped in df135b2:
+open_count = sum(... for nse positions ...)
+remaining_slots = max(1, INTRADAY_MAX_POSITIONS - open_count)
+max_capital_per_trade = (mkt_equity / remaining_slots) * 0.80
+```
+
+This would mean: first trade ≤20% of NSE, second ≤25% of *remaining*
+(80% / 4 slots = 20% of total), etc. Each trade reserves headroom for
+the slots still to come.
+
+**Today's data shows the gap is latent, not active:**
+Most of today's trades sized by risk-budget (wide SL → smaller
+position) so cap rarely binds. But TATACOMM did hit the cap. A day
+of 5 tight-SL signals (typical of low-volatility regime) would
+fully deploy at the cap on every trade.
+
+**Severity:** Medium. Doesn't break trading today, but the safety
+margin against a "5 cap-hits" day is thin. Worth landing alongside
+the audit team's existing P1 work — completes the original proposal.
+
+**Acceptance test:** Force a scenario with 5 simulated BUYs all
+sized at the cap. After the 5th `try_open()`, NSE cash should be
+≥ 5% of `nse_initial_cash`, not ~0.
 
 ---
 
