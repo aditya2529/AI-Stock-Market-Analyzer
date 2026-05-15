@@ -890,6 +890,75 @@ cycle should equal `nse_initial_cash + sum(net_pnl)` to the rupee.
 
 ---
 
+## P22. No startup / pre-market Telegram heartbeat — user has no way to confirm engine booted
+
+**Symptom (May 15, 09:00 IST pre-market):** User opened the project
+expecting "at least a health message from Telegram" confirming the
+engine had started for the day. None arrived because none is coded.
+
+**Current Telegram trigger inventory:**
+- Engine pulse — every 6 ticks (~30 min) during market hours only.
+  First fires at ~09:45 IST, 30 min after market open.
+- BUY/SELL alert — only when a signal clears confidence floor.
+- Trade-closed alert — on SL/target/signal exit.
+- EOD portfolio summary — after 15:15 force-close.
+- Watchdog death alert — only on engine crash.
+- Test ping — manual via `python main.py alerts test`.
+
+**The gap:**
+- No "engine started" message at 09:10 IST when the scheduled task fires.
+- No "pre-market — waiting for 09:15 open" reassurance.
+- A silent engine that successfully booted looks identical from
+  Telegram's side to an engine that crashed before its first tick.
+  Watchdog covers the latter, but only at 5-min granularity AFTER
+  market opens.
+
+**User impact:** Forces the user to dashboard or DB query to confirm
+the system is alive each morning. Defeats the point of Telegram
+being the primary observability channel.
+
+**Proposed fix (~15 LOC):**
+
+1. In `intraday/engine.py` at the top of `run_intraday_session()`,
+   immediately after `init_paper_tables()`, send a startup ping:
+
+   ```python
+   from alerts.telegram_bot import send_engine_pulse
+   send_engine_pulse({
+       "now": _ist_now().strftime("%H:%M"),
+       "symbols_processed": 0,
+       "open_positions": len(get_open_positions()),
+       "new_today": 0, "closed_today": 0,
+       "cash": float(get_market_cash("nse")),
+       "total": float(get_market_cash("nse")),
+       "drawdown_pct": 0.0,
+       "last_tick_actions": 0,
+       "ram_mb": None,
+       "_status_prefix": "🟢 Engine started",  # extend formatter
+   })
+   ```
+
+2. Extend `format_engine_pulse()` in `alerts/telegram_bot.py` to
+   honour an optional `_status_prefix` field — when present, swap
+   the leading 🤖 emoji + "Engine pulse" line for the prefix.
+
+3. Verify on next session boot that user receives a Telegram within
+   60 seconds of 09:10:00 IST containing fresh NSE cash + open
+   position count.
+
+**Alternative (lighter touch):** Add a `send_test_ping`-style "Engine
+booted" two-liner instead of a full pulse. Less informative but
+zero risk of formatting issues.
+
+**Severity:** Medium — observability gap, not correctness. User-
+visible quality-of-life fix.
+
+**Acceptance test:** On next Mon-Fri 09:10 IST auto-boot, user receives
+a Telegram message before market open (09:15 IST) confirming engine
+is alive and showing NSE cash + open-position count.
+
+---
+
 ## Notes for the audit team
 
 - Production today is running on the user's Windows laptop (8 GB RAM,
