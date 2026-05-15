@@ -7,4 +7,6 @@ cd /d "D:\Projects\AI Stock Market Analyzer"
 set LOGDIR=D:\Projects\AI Stock Market Analyzer\logs
 if not exist "%LOGDIR%" mkdir "%LOGDIR%"
 
-python main.py dashboard --host 127.0.0.1 >> "%LOGDIR%\dashboard.log" 2>&1
+REM Bind to 0.0.0.0 so Tailscale-connected devices (phone, etc.) can reach the
+REM dashboard. Tailnet ACLs already restrict access to your devices only.
+python main.py dashboard --host 0.0.0.0 >> "%LOGDIR%\dashboard.log" 2>&1

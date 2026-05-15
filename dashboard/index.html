@@ -301,6 +301,31 @@
     </div>
   </div>
 
+  <!-- ── Signal Lookup (any symbol on demand) ── -->
+  <div class="card card-glow" id="signal-lookup-card"
+       title="Type any NSE symbol (e.g. RELIANCE.NS) and get the model's current BUY/SELL/HOLD signal with stop-loss, target, and confidence."
+       style="padding:14px 18px;margin-top:10px">
+    <div class="card-title" style="margin-bottom:10px">CHECK SIGNAL</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+      <input id="sl-symbol-input" list="sl-symbol-suggestions" placeholder="e.g. RELIANCE.NS"
+             style="flex:1;min-width:220px;padding:8px 12px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;text-transform:uppercase"
+             onkeydown="if(event.key==='Enter') lookupSignal()" />
+      <datalist id="sl-symbol-suggestions">
+        <option value="RELIANCE.NS"><option value="TCS.NS"><option value="INFY.NS"><option value="HDFCBANK.NS">
+        <option value="ICICIBANK.NS"><option value="SBIN.NS"><option value="AXISBANK.NS"><option value="KOTAKBANK.NS">
+        <option value="HCLTECH.NS"><option value="WIPRO.NS"><option value="LT.NS"><option value="MARUTI.NS">
+        <option value="TATASTEEL.NS"><option value="HINDALCO.NS"><option value="ITC.NS"><option value="HINDUNILVR.NS">
+        <option value="ADANIENT.NS"><option value="ADANIPORTS.NS"><option value="CIPLA.NS"><option value="SUNPHARMA.NS">
+        <option value="BAJAJ-AUTO.NS"><option value="BHARTIARTL.NS"><option value="ONGC.NS"><option value="BPCL.NS">
+        <option value="NESTLEIND.NS"><option value="DRREDDY.NS"><option value="BRITANNIA.NS"><option value="M&M.NS">
+      </datalist>
+      <button onclick="lookupSignal()"
+              style="padding:8px 18px;background:var(--cyan);border:none;border-radius:6px;color:var(--bg);font-family:var(--mono);font-weight:700;font-size:12px;cursor:pointer;letter-spacing:0.5px">GET SIGNAL</button>
+    </div>
+    <div id="sl-result" style="display:none;font-family:var(--mono);font-size:12px;padding:12px;background:var(--bg3);border-radius:6px;border:1px solid var(--border)"></div>
+    <div id="sl-status" style="font-family:var(--mono);font-size:11px;color:var(--muted);font-style:italic"></div>
+  </div>
+
   <!-- ── Top Metrics (NSE-only) ── -->
   <div class="metrics-row" style="grid-template-columns:repeat(4,1fr)">
     <div class="metric-card" style="border-color:rgba(56,189,248,.25)">
@@ -1319,6 +1344,70 @@ function renderUsStocksGrid(stocks) {
       <div class="watch-row"><span class="watch-key">% Move</span><span class="watch-v" style="color:${col}">${pos?'+':''}${pct}%</span></div>
     </div>`;
   }).join('');
+}
+
+// ── Signal Lookup (any symbol on demand) ─────────────────────────────────
+async function lookupSignal() {
+  const inputEl = document.getElementById('sl-symbol-input');
+  const resultEl = document.getElementById('sl-result');
+  const statusEl = document.getElementById('sl-status');
+  let sym = (inputEl.value || '').trim().toUpperCase();
+  if (!sym) { statusEl.textContent = 'Enter a symbol first.'; return; }
+  // Default to NSE if user typed bare ticker
+  if (!sym.includes('.') && !sym.includes(':')) sym = sym + '.NS';
+  inputEl.value = sym;
+
+  resultEl.style.display = 'none';
+  statusEl.textContent = `Fetching signal for ${sym}…`;
+  try {
+    const r = await fetch(`${API}/api/signals/${encodeURIComponent(sym)}`);
+    if (!r.ok) {
+      statusEl.textContent = `Error ${r.status}: symbol may be invalid or yfinance is unreachable.`;
+      return;
+    }
+    const s = await r.json();
+    const sig = (s.signal || 'HOLD').toUpperCase();
+    const colorMap = { BUY: 'var(--green)', SELL: 'var(--red)', HOLD: 'var(--label)' };
+    const emojiMap = { BUY: '🟢', SELL: '🔴', HOLD: '⚪' };
+    const col = colorMap[sig] || 'var(--label)';
+    const emoji = emojiMap[sig] || '⚪';
+    const conf = ((s.confidence ?? 0) * 100).toFixed(1);
+    const price = Number(s.price ?? 0).toFixed(2);
+    const sl = Number(s.stop_loss ?? 0).toFixed(2);
+    const tp = Number(s.target ?? 0).toFixed(2);
+    const rr = Number(s.risk_reward ?? 0).toFixed(1);
+    const regime = s.regime || '—';
+    const shares = s.shares ?? 0;
+    const reasons = (s.reasons || []).slice(0, 4).map(x => `• ${x}`).join('<br>');
+    const ts = s.timestamp ? new Date(s.timestamp).toLocaleString() : '—';
+
+    resultEl.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border)">
+        <div>
+          <div style="font-size:11px;color:var(--label);letter-spacing:1px">${s.symbol || sym}</div>
+          <div style="font-size:22px;font-weight:700;color:${col};letter-spacing:1px">${emoji} ${sig}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:11px;color:var(--label)">CONFIDENCE</div>
+          <div style="font-size:22px;font-weight:700;color:${col}">${conf}%</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px 16px;margin-bottom:10px">
+        <div><span style="color:var(--label)">Price:</span> <b>₹${price}</b></div>
+        <div><span style="color:var(--label)">Stop-Loss:</span> <b style="color:var(--red)">₹${sl}</b></div>
+        <div><span style="color:var(--label)">Target:</span> <b style="color:var(--green)">₹${tp}</b></div>
+        <div><span style="color:var(--label)">R:R:</span> <b>${rr}x</b></div>
+        <div><span style="color:var(--label)">Regime:</span> <b>${regime}</b></div>
+        <div><span style="color:var(--label)">Shares:</span> <b>${shares}</b></div>
+      </div>
+      ${reasons ? `<div style="color:var(--muted);font-size:11px;line-height:1.6">${reasons}</div>` : ''}
+      <div style="margin-top:8px;font-size:10px;color:var(--muted);font-style:italic">As of ${ts}</div>
+    `;
+    resultEl.style.display = 'block';
+    statusEl.textContent = '';
+  } catch (e) {
+    statusEl.textContent = `Network error: ${e.message}`;
+  }
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────
