@@ -352,6 +352,24 @@ def run_intraday_session(symbols: list[str], ensemble, portfolio_value: float = 
         logger.info("P20: force-close already completed for %s — skipping",
                     date.today().isoformat())
 
+    # P22: one-shot Telegram heartbeat at session start. The 09:10 IST
+    # auto-boot used to be silent until the first BUY (could be 11:00+),
+    # so a successful boot looked identical to a silent crash from the
+    # user's phone. Wrapped in try/except so a Telegram outage can never
+    # block the engine from starting. Independent of the 30-min engine
+    # pulse — this fires exactly once per session.
+    try:
+        from alerts.telegram_bot import send_message
+        from paper_trading.portfolio import get_market_cash
+        send_message(
+            f"🟢 <b>Engine started</b>\n"
+            f"<i>{_ist_now().strftime('%a %d %b %H:%M IST')}</i>\n"
+            f"NSE cash: ₹{get_market_cash('nse'):,.0f}\n"
+            f"Symbols: {len(symbols)}"
+        )
+    except Exception as e:
+        logger.warning("startup heartbeat failed (non-fatal): %s", e)
+
     logger.info("Intraday session started | %d symbols | 5-min bars", len(symbols))
     print(f"\n  Intraday session running — {len(symbols)} symbols")
     print(f"  Signals every 5 min | Force close at 3:15 PM IST")
