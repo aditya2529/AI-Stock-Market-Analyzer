@@ -892,6 +892,8 @@ cycle should equal `nse_initial_cash + sum(net_pnl)` to the rupee.
 
 ## P22. No startup / pre-market Telegram heartbeat — user has no way to confirm engine booted
 
+**Status:** FIXED in b0f8306 — `intraday/engine.py:run_intraday_session` sends a one-shot Telegram message just after `init_paper_tables()` + the P20 stale-position guard + the forced-closed check, before the main loop begins. Payload includes IST timestamp, NSE cash, and symbol count. Wrapped in `try/except` so a Telegram outage at boot can never prevent the engine from starting. Independent of the 30-min engine pulse — fires exactly once per session.
+
 **Symptom (May 15, 09:00 IST pre-market):** User opened the project
 expecting "at least a health message from Telegram" confirming the
 engine had started for the day. None arrived because none is coded.
