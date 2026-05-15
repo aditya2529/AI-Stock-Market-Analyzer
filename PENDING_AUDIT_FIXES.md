@@ -959,6 +959,72 @@ is alive and showing NSE cash + open-position count.
 
 ---
 
+## P23. Telegram alert delivery latency makes intraday alerts non-actionable
+
+**Symptom (May 15, 09:15 IST):** Engine opened TATACOMM.NS BUY at
+09:15:08 IST. Telegram dispatch logged at the same moment. User
+received the Telegram notification on phone at **09:24 IST — 9
+minutes late**.
+
+**Diagnostic evidence:** Manual replay of the same payload via direct
+Telegram API call (`urllib.request.urlopen`) returned `HTTP 200 |
+ok: true | message_id: <int>` instantly. Telegram's servers accepted
+both the engine's original message AND the replay without latency.
+
+**This rules out:**
+- Engine bug (PYTHONIOENCODING + P9/P11 fix working as designed)
+- HTTP send failure (P17 hypothesis a, b — both ruled out)
+- Bot token / chat_id misconfiguration (test_ping arrives instantly)
+
+**Root cause is phone/network/Telegram-client side:**
+- Telegram app likely backgrounded → using poll-based sync rather
+  than FCM push, with intervals of several minutes.
+- Android Doze mode / iOS Background App Refresh throttling.
+- Possibly mobile network congestion at market-open hour.
+
+**Why this matters for intraday:**
+- TATACOMM SL is ₹1,667.85 (just ~₹9 below ₹1,676.58 entry).
+- At 5-min bar granularity, price can move ~₹5-15 in 9 minutes.
+- A 9-min-stale alert means the user is reacting to a position that
+  may already have hit SL or moved past optimal exit — alert is
+  informational at best, useless for any intervention.
+
+**This is not a code fix.** The audit team's P9/P11 work was correct
+for what it scoped. But P17/P23 together prove: even with the crash
+fixed, the user-facing alert pipeline has a hidden second-stage
+failure mode that's invisible from the server log.
+
+**Proposed mitigations (user-side, no code):**
+1. Whitelist the Telegram bot for "high-priority notifications" in
+   Android/iOS notification settings.
+2. Disable battery optimization for the Telegram app.
+3. Ensure Telegram has "background app refresh" / unrestricted
+   background data on the mobile network.
+4. If on Android: check `Settings → Apps → Telegram → Battery →
+   Unrestricted`.
+
+**Proposed mitigations (code-side, secondary):**
+1. Add a secondary fast channel — e.g. a webhook to a simpler
+   push service (Pushover, ntfy.sh) that has stricter SLAs than
+   Telegram client-side delivery.
+2. Send alerts via SMS for trades above a confidence threshold
+   (e.g. via Twilio). Higher cost, but SMS push is OS-native.
+3. Add a "first-tick-after-trade-open" log entry that fires on the
+   NEXT tick if a position was opened in the previous tick — at
+   least the trade is visible in the dashboard immediately even if
+   Telegram is slow.
+
+**Severity:** Medium-High. Alerts that lag 9 min behind reality break
+the core observability promise of the project. User received the
+TATACOMM alert at 09:24 IST — by then the position had already been
+held for one full 5-min bar without their awareness.
+
+**Acceptance test:** Next 5 trades, measure end-to-end latency
+(engine OPEN log timestamp → phone notification timestamp). Target
+< 60s for at least 4 of 5 trades.
+
+---
+
 ## Notes for the audit team
 
 - Production today is running on the user's Windows laptop (8 GB RAM,
