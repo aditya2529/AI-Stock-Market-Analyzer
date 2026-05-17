@@ -1286,6 +1286,87 @@ P20 fix was looking at the wrong layer.
 
 ---
 
+## P28. No daily safety gates — total exposure, daily loss, daily trade count all uncapped
+
+**Symptom (observed indirectly May 15):** Engine opened 7 BUYs through Friday. After 4 SL losses in a row (between 11:00 and 15:00 IST), nothing stopped it from continuing to open new positions. Net Day-3 result was -₹708 only because per-trade sizes were small. On a day with bigger sizing (post P25 cap-hit on every trade), the same loss-streak pattern could realize 5-10% NSE drawdown before market close.
+
+**What's enforced today (correctly):**
+- Per-trade risk budget: `MAX_RISK_PCT` = 1%
+- Per-trade concentration cap: 20% × NSE cash, scaled by remaining slots (P25)
+- Per-trade cash safety: ≤ 95% of remaining cash
+- Max concurrent positions: `INTRADAY_MAX_POSITIONS` = 5
+- Stop-loss on every position: 1 × ATR
+
+**What's NOT enforced (the gap):**
+
+1. **Total simultaneous exposure cap.** With 5 positions at the per-trade cap, ~80% of NSE cash can be deployed at once. No "never more than 70% deployed across all open positions" rule. The 5-slot cap doesn't equal an exposure cap because the per-slot sizes can compound.
+
+2. **Daily loss circuit breaker.** `CLAUDE.md` mentions "Daily loss limit: 3% portfolio" as a design constraint, but **grep of `intraday/engine.py` and `paper_trading/executor.py` finds no enforcement**. It's documentation, not code. A bad day can run unbounded until 15:15 force-close.
+
+3. **Daily trade-count cap.** No upper bound on BUYs-per-day. After 5 SL losses you could still open a 6th if a slot freed up. Backtest cadence is ~1.2 trades/day; production hit 7 on Friday. No alert that flags "you've already traded 5× the backtest cadence today."
+
+**Proposed fix (~30 LOC, three guards in `_process_symbol()` BEFORE the BUY-open branch):**
+
+```python
+# In intraday/engine.py near line 210, before "if signal == 'BUY' and pos is None:"
+
+# Guard 1: total simultaneous exposure
+from paper_trading.portfolio import get_open_positions, get_market_cash
+nse_initial = float(get_config("nse_initial_cash", "500000"))
+nse_open_positions = get_open_positions()
+if not nse_open_positions.empty:
+    nse_open_eq = sum(
+        float(r["entry_price"]) * int(r["shares"])
+        for _, r in nse_open_positions.iterrows()
+        if r["symbol"].endswith(".NS")
+    )
+else:
+    nse_open_eq = 0.0
+TOTAL_EXPOSURE_CAP = 0.80  # never deploy > 80% of NSE simultaneously
+if nse_open_eq > TOTAL_EXPOSURE_CAP * nse_initial:
+    logger.info("%s: total exposure %.0f%% > cap — skipping BUY",
+                symbol, (nse_open_eq / nse_initial) * 100)
+    return {"_action": "exposure_capped", "symbol": symbol}
+
+# Guard 2: daily loss circuit breaker
+import sqlite3
+conn = sqlite3.connect("market_data.db")
+today_pnl_row = conn.execute(
+    "SELECT COALESCE(SUM(net_pnl), 0) FROM paper_trades "
+    "WHERE date(exit_time) = date('now','localtime')"
+).fetchone()
+today_pnl = float(today_pnl_row[0])
+DAILY_LOSS_LIMIT = -0.03  # halt new opens if down > 3% NSE
+if today_pnl < DAILY_LOSS_LIMIT * nse_initial:
+    logger.warning("%s: daily P&L %.2f below -3%% — halting new BUYs",
+                   symbol, today_pnl)
+    return {"_action": "daily_loss_halt", "symbol": symbol}
+
+# Guard 3: daily trade-count cap
+today_count = conn.execute(
+    "SELECT COUNT(*) FROM paper_trades "
+    "WHERE date(exit_time) = date('now','localtime')"
+).fetchone()[0] + len(nse_open_positions)
+DAILY_TRADE_CAP = 8  # 5 max open + a handful of closes/re-entries
+if today_count >= DAILY_TRADE_CAP:
+    logger.info("%s: daily trade count %d >= cap — skipping BUY",
+                symbol, today_count)
+    return {"_action": "daily_count_capped", "symbol": symbol}
+```
+
+**Three new action codes in tick summary:** `exposure_capped`, `daily_loss_halt`, `daily_count_capped`.
+
+**Regression tests (audit team to add):**
+1. With 4 open positions whose combined value > 80% of NSE: 5th BUY signal must return `{"_action": "exposure_capped"}` and `paper_positions` count stays at 4.
+2. With cumulative day P&L < -3% NSE: next BUY signal must return `{"_action": "daily_loss_halt"}` and no new position opens.
+3. With 8 trades already counted today: next BUY signal must return `{"_action": "daily_count_capped"}`.
+
+**Severity:** Medium. Defense-in-depth. Not Monday-blocking (Friday's worst was 0.14% loss), but a real hole that compounds with larger NSE allocation. Worth filing because the gap is silent — engine doesn't tell you the protection isn't there until you have a bad day.
+
+**Acceptance:** all 3 tests pass, engine logs the new action codes when guards fire, no regression in existing tests.
+
+---
+
 ## Notes for the audit team
 
 - Production today is running on the user's Windows laptop (8 GB RAM,
