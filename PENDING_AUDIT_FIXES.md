@@ -1288,6 +1288,8 @@ P20 fix was looking at the wrong layer.
 
 ## P28. No daily safety gates — total exposure, daily loss, daily trade count all uncapped
 
+**Status:** FIXED in Round 3 — test `3c7550d`, fix commit follows. Three guards now fire in `intraday/engine.py:_process_symbol` BEFORE the BUY-open branch via a new `_p28_daily_gate_block(symbol)` helper. (1) `TOTAL_EXPOSURE_CAP = 0.80` returns `{"_action": "exposure_capped"}` when NSE open equity exceeds 80% of `nse_initial_cash`. (2) `DAILY_LOSS_LIMIT = -0.03` returns `{"_action": "daily_loss_halt"}` when cumulative same-day `paper_trades.net_pnl` drops below -3% of NSE initial. (3) `DAILY_TRADE_CAP = 8` returns `{"_action": "daily_count_capped"}` when same-day closed+open trade count reaches 8. All three counters added to `tick_counts` dict and the per-tick summary log line so a blocked tick is never silent.
+
 **Symptom (observed indirectly May 15):** Engine opened 7 BUYs through Friday. After 4 SL losses in a row (between 11:00 and 15:00 IST), nothing stopped it from continuing to open new positions. Net Day-3 result was -₹708 only because per-trade sizes were small. On a day with bigger sizing (post P25 cap-hit on every trade), the same loss-streak pattern could realize 5-10% NSE drawdown before market close.
 
 **What's enforced today (correctly):**
@@ -1427,7 +1429,7 @@ def test_concurrent_load_macro_context_no_crash():
 
 ## P30. SL cooldown wipes on every engine restart → same symbol re-entered after stop-loss (HIGH)
 
-**Status:** FIXED in Round 3 — test `6d03942`, fix commit follows. SL cooldown is now persisted to `paper_config` under key `sl_cooldown_<YYYY-MM-DD>` (mirrors the P20 `forced_closed_<date>` pattern). `_add_to_sl_cooldown(symbol)` updates both the in-memory set and the DB key in one call; `_load_sl_cooldown_for_today()` reads the persisted CSV back into a set. `run_intraday_session()` rehydrates the in-memory set from DB on every startup (including watchdog restarts), so the AMBUJACEM double-stop scenario cannot recur within the same trading day.
+**Status:** FIXED in Round 3 — test `6d03942`, fix `a66c900`. SL cooldown is now persisted to `paper_config` under key `sl_cooldown_<YYYY-MM-DD>` (mirrors the P20 `forced_closed_<date>` pattern). `_add_to_sl_cooldown(symbol)` updates both the in-memory set and the DB key in one call; `_load_sl_cooldown_for_today()` reads the persisted CSV back into a set. `run_intraday_session()` rehydrates the in-memory set from DB on every startup (including watchdog restarts), so the AMBUJACEM double-stop scenario cannot recur within the same trading day.
 
 **Symptom (Mon May 18, 09:35–10:00 IST):** AMBUJACEM.NS opened, hit stop-loss, was added to in-memory `_sl_cooldown` set. Engine crashed (P29). Watchdog restarted. New process has FRESH (empty) `_sl_cooldown`. Engine immediately re-opened AMBUJACEM.NS at the next BUY signal. **Stopped out again.** Two identical losses on the same symbol within ~10 minutes: -₹712 + -₹715 = **-₹1,427**.
 

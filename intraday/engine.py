@@ -68,6 +68,77 @@ def _add_to_sl_cooldown(symbol: str) -> None:
     set_config(key, ",".join(sorted(symbols)))
 
 
+# P28: daily safety gates — total NSE exposure cap, daily-loss circuit
+# breaker, and daily trade-count cap. All three are defense-in-depth
+# guards that fire BEFORE the BUY-open branch's existing slot/cooldown
+# checks. Documented thresholds (defense vs. opportunity trade-off):
+TOTAL_EXPOSURE_CAP = 0.80   # never deploy > 80% of nse_initial_cash
+DAILY_LOSS_LIMIT = -0.03    # halt new opens if today's net_pnl < -3%
+DAILY_TRADE_CAP = 8         # 5 max-open + a few closes/re-entries
+
+
+def _p28_daily_gate_block(symbol: str) -> dict | None:
+    """Return an action dict if any of the three daily gates trip, else None.
+
+    Reads:
+        - paper_config[nse_initial_cash] — the per-session NSE budget
+        - paper_positions — current open NSE equity sum
+        - paper_trades — today's cumulative net_pnl + trade count
+
+    Uses isolated per-call SQLite connections (P29 pattern). Cheap on
+    the hot path: two small SELECT COALESCE(SUM/COUNT) queries against
+    indexes-friendly columns.
+    """
+    from paper_trading.portfolio import get_open_positions, get_config
+    import sqlite3
+    # Read DB_PATH from data.database at call time so test fixtures that
+    # monkeypatch data.database.DB_PATH redirect this gate to the tmp DB
+    # (same pattern used by load_ohlcv — see test_p26_force_close.py).
+    from data import database as _db_mod
+
+    nse_initial = float(get_config("nse_initial_cash", "500000") or "500000")
+    nse_positions = get_open_positions()
+    if not nse_positions.empty:
+        nse_open_eq = sum(
+            float(r["entry_price"]) * int(r["shares"])
+            for _, r in nse_positions.iterrows()
+            if r["symbol"].endswith(".NS")
+        )
+    else:
+        nse_open_eq = 0.0
+    if nse_open_eq > TOTAL_EXPOSURE_CAP * nse_initial:
+        logger.info("%s: total exposure %.0f%% > %.0f%% cap — skipping BUY",
+                    symbol, (nse_open_eq / nse_initial) * 100,
+                    TOTAL_EXPOSURE_CAP * 100)
+        return {"_action": "exposure_capped", "symbol": symbol}
+
+    conn = sqlite3.connect(str(_db_mod.DB_PATH), check_same_thread=False)
+    try:
+        today_pnl = float(conn.execute(
+            "SELECT COALESCE(SUM(net_pnl), 0) FROM paper_trades "
+            "WHERE date(exit_time) = date('now','localtime')"
+        ).fetchone()[0])
+        today_closed_count = int(conn.execute(
+            "SELECT COUNT(*) FROM paper_trades "
+            "WHERE date(exit_time) = date('now','localtime')"
+        ).fetchone()[0])
+    finally:
+        conn.close()
+
+    if today_pnl < DAILY_LOSS_LIMIT * nse_initial:
+        logger.warning("%s: daily P&L %.2f below %.0f%% — halting new BUYs",
+                       symbol, today_pnl, DAILY_LOSS_LIMIT * 100)
+        return {"_action": "daily_loss_halt", "symbol": symbol}
+
+    today_count = today_closed_count + len(nse_positions)
+    if today_count >= DAILY_TRADE_CAP:
+        logger.info("%s: daily trade count %d >= cap %d — skipping BUY",
+                    symbol, today_count, DAILY_TRADE_CAP)
+        return {"_action": "daily_count_capped", "symbol": symbol}
+
+    return None
+
+
 def _ist_now() -> datetime:
     return datetime.now(IST)
 
@@ -243,6 +314,12 @@ def _process_symbol(symbol: str, ensemble, portfolio_value: float) -> dict | Non
         return {"_action": "sell_ignored_no_position", "symbol": symbol}
 
     if signal == "BUY" and pos is None:
+        # P28: daily safety gates (exposure / loss / count) — fire BEFORE
+        # any existing slot/cooldown/sizing logic so a bad day cannot
+        # quietly compound. See _p28_daily_gate_block for details.
+        gate = _p28_daily_gate_block(symbol)
+        if gate is not None:
+            return gate
         # Fix 2: block re-entry if symbol hit SL earlier today
         if symbol in _sl_cooldown:
             logger.info("%s: SL cooldown active — skipping BUY", symbol)
@@ -478,6 +555,9 @@ def run_intraday_session(symbols: list[str], ensemble, portfolio_value: float = 
                        "regime_blocked": 0, "conf_blocked": 0,
                        "cooldown": 0, "max_pos": 0,
                        "sell_ignored_no_position": 0,
+                       # P28 — three new daily safety gates
+                       "exposure_capped": 0, "daily_loss_halt": 0,
+                       "daily_count_capped": 0,
                        "processed": 0, "errors": 0}
         with ThreadPoolExecutor(max_workers=8) as ex:
             futures = {ex.submit(_process_symbol, sym, ensemble, portfolio_value): sym
@@ -498,11 +578,16 @@ def run_intraday_session(symbols: list[str], ensemble, portfolio_value: float = 
 
         logger.info(
             "Tick summary: processed=%d | regime_blocked=%d | conf_blocked=%d "
-            "| cooldown=%d | max_pos=%d | sell_ignored=%d | opened=%d | closed=%d"
-            "%s",
+            "| cooldown=%d | max_pos=%d | sell_ignored=%d "
+            # P28: surface the three new daily safety gate counters so a
+            # blocked tick is never silent. Zero on a healthy day.
+            "| exposure_capped=%d | daily_loss_halt=%d | daily_count_capped=%d "
+            "| opened=%d | closed=%d%s",
             tick_counts["processed"], tick_counts["regime_blocked"],
             tick_counts["conf_blocked"], tick_counts["cooldown"],
             tick_counts["max_pos"], tick_counts["sell_ignored_no_position"],
+            tick_counts["exposure_capped"], tick_counts["daily_loss_halt"],
+            tick_counts["daily_count_capped"],
             tick_counts["opened"], tick_counts["closed"],
             (f" | errors={tick_counts['errors']}" if tick_counts["errors"] else ""),
         )

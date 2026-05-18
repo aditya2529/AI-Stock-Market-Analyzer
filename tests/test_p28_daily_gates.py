@@ -98,8 +98,8 @@ def _seed_closed_trades(rows):
     """Insert rows directly into paper_trades. Each row is
     (symbol, entry_price, exit_price, shares, net_pnl)."""
     import sqlite3
-    from data.database import DB_PATH
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    from data import database as _db_mod
+    conn = sqlite3.connect(str(_db_mod.DB_PATH), check_same_thread=False)
     try:
         now = datetime.utcnow().isoformat()
         for sym, entry, exit_p, shares, net_pnl in rows:
