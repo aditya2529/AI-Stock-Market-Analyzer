@@ -1486,6 +1486,57 @@ def test_sl_cooldown_survives_restart():
 
 ---
 
+## P31. `curl_cffi` shutdown race in `__del__` — access violation on ThreadPoolExecutor exit (LOW)
+
+**Symptom (Mon May 18, 11:00:33 IST):** Engine crashed with `0xc0000005` access violation **during shutdown**, not on a BUY. Captured by faulthandler in `logs/faulthandler.log` lines 645–687.
+
+**Stack trace (paraphrased — all 8 worker threads showed identical frames):**
+
+```
+Windows fatal exception: access violation
+
+8 threads simultaneously in:
+  File "curl_cffi/curl.py", line 610 in close
+  File "curl_cffi/curl.py", line 261 in __del__
+
+Main thread:
+  File "threading.py", line 1139 in _wait_for_tstate_lock
+  File "threading.py", line 1119 in join
+  File "concurrent/futures/thread.py", line 235 in shutdown
+  File "concurrent/futures/_base.py", line 647 in __exit__
+  File "intraday/engine.py", line 562 in run_intraday_session
+```
+
+**What this is:** `curl_cffi` is yfinance's libcurl backend. When `ThreadPoolExecutor.__exit__` triggers shutdown, Python GC fires `__del__` on each worker thread's curl handle simultaneously. `curl_cffi.curl.close()` is not thread-safe under concurrent multi-thread cleanup — heap state collides.
+
+**Not P29.** P29 was SQLite race on BUY path. P31 is curl_cffi race on SHUTDOWN path. Different libraries, different paths, different triggers.
+
+**Reproducibility:** Only on engine shutdown / restart, not on normal ticks. PID 16184 has been alive 29+ min post-fix with no recurrence — confirms this is purely shutdown-path.
+
+**Why low priority:**
+- Doesn't fire mid-day during normal operation
+- Watchdog absorbs the rare restart case (10s downtime acceptable)
+- Engine has graceful exit path 99% of the time (force-close at 15:30 IST); this race only triggers on messy shutdown
+- May 18 11:00:33 occurrence was during the chaotic morning transition (disabled→enabled); not normal scenario
+
+**Proposed fixes (in order of effort):**
+
+1. **Cheapest:** Try `curl_cffi` version pin / upgrade. Check pyproject for installed version (`pip show curl_cffi`); see if newer release fixes the close-from-multiple-threads race. Pin in `requirements.txt`.
+
+2. **Explicit session-close before shutdown:** Hold yfinance session refs in each worker; explicitly close them before `ThreadPoolExecutor.__exit__`. Yfinance doesn't expose sessions cleanly — medium effort.
+
+3. **Process-level isolation:** Move yfinance calls to subprocess per fetch. Heavyweight; adds 100-300ms per call. Not worth it for a shutdown-only bug.
+
+4. **Defer entirely:** Phase 3 replaces yfinance with broker direct feed (Upstox / Zerodha Kite) — this bug disappears at that point. Mark as "wontfix-until-phase-3".
+
+**Recommended:** option 1 if a fix exists upstream, else option 4.
+
+**Regression test:** Hard to unit-test — fires only on shutdown. Recommend `scripts/p31_shutdown_stress.py` that spins up + shuts down a ThreadPoolExecutor doing yfinance fetches 50 times; assert no process death. Flaky by nature.
+
+**Severity:** LOW. Not blocking. Polish-for-Phase-3 item.
+
+---
+
 ## Notes for the audit team
 
 - Production today is running on the user's Windows laptop (8 GB RAM,
