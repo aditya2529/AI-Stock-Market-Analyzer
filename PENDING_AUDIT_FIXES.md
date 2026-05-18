@@ -1369,6 +1369,8 @@ if today_count >= DAILY_TRADE_CAP:
 
 ## P29. P24 fix is INCOMPLETE — `_load_macro_context` still uses shared SQLite connection (CRITICAL)
 
+**Status:** FIXED in Round 3 (test `a3e2c05`, fix follows). `_load_macro_context` now (a) caches its 4-tuple result behind a process-wide lock with a 5-min TTL so 50-symbol × 8-worker fanout collapses to ONE DB read per tick window instead of ~800, and (b) when the cache misses, opens its own isolated `sqlite3.connect(DB_PATH, check_same_thread=False)` and reads `^NSEI` + `^INDIAVIX` inline (skipping `load_ohlcv`'s call frame entirely). Additionally `data/database.py:get_connection` is now a `@contextmanager` that explicitly closes the connection on exit (Python 3.11's `with sqlite3.connect(...)` only commits, doesn't close — connections were lingering in GC holding shared C state across worker threads). Every worker-reachable read site inherits the per-call connection automatically.
+
 **Symptom (Mon May 18, 09:35–10:00 IST):** Engine crashed **6 times in 30 min** despite Round 2's P24 fix (`2643b42`) being deployed. Exit codes: `0xc0000374 ×3` + `0xc0000005 ×3`. Watchdog kept restarting; each restart triggered another BUY, which triggered another crash.
 
 **Smoking gun from `logs/faulthandler.log` (multiple identical worker-thread stacks):**

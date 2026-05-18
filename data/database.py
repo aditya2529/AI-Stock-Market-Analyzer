@@ -1,18 +1,49 @@
 from __future__ import annotations
 import sqlite3
+from contextlib import contextmanager
 import pandas as pd
 from pathlib import Path
 from config import DB_PATH
 
 
-def get_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+@contextmanager
+def get_connection():
+    """P29: per-call SQLite connection — thread-safe, explicit close.
+
+    Every caller (including those in worker threads under the engine's
+    8-thread pool) gets an isolated connection with
+    ``check_same_thread=False`` and NO ``PRAGMA journal_mode=WAL`` on
+    the hot path. The DB is set to WAL persistently once by
+    ``init_db()``; re-running the pragma on every connect was the
+    documented C-state-leak trigger that caused heap corruption in
+    ``pandas._fetchall_as_list`` (see ``logs/faulthandler.log`` —
+    May 18, 09:35-10:00 IST, 6 crashes in 30 min on the
+    ``_load_macro_context`` -> ``load_ohlcv`` path, after Round 2's
+    narrow patch to ``load_ohlcv`` itself).
+
+    This is a context manager: it commits on clean exit, rolls back on
+    exception, and ALWAYS closes the connection (the bare
+    ``with sqlite3.connect(...) as conn:`` pattern on Python < 3.12
+    commits/rolls-back but does NOT close — connections lingered in GC
+    holding shared C state across threads).
+    """
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def init_db():
+    # WAL mode is set persistently here, not on every connect. A
+    # successful PRAGMA journal_mode=WAL writes the mode into the DB
+    # header and survives across processes.
     with get_connection() as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS ohlcv (
                 id        INTEGER PRIMARY KEY AUTOINCREMENT,

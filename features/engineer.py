@@ -145,22 +145,95 @@ def compute_time_features(index: pd.DatetimeIndex) -> dict:
 
 # ── Main entry point ───────────────────────────────────────────────────────────
 
-def _load_macro_context() -> tuple[pd.Series, pd.Series]:
+# P29: TTL cache for macro context.
+# Without this cache, ``_load_macro_context`` fires twice (^NSEI, ^INDIAVIX)
+# on every symbol tick. On a 50-symbol/8-worker tick that's up to ~800
+# concurrent SQLite reads against the SAME daily-bar table per 5-min
+# window. Even with the Round-2 per-call connection fix to ``load_ohlcv``,
+# the aggregate concurrent pressure on those two macro symbols was the
+# dominant heap-corruption trigger (see ``logs/faulthandler.log`` —
+# May 18, 09:35-10:00 IST). Macro daily bars change at most once per
+# trading day; a 5-minute TTL is effectively a session-wide cache while
+# still picking up fresh ingests within the same engine run.
+import threading
+_MACRO_CACHE_LOCK = threading.Lock()
+_MACRO_CACHE: dict = {"bucket": None, "value": None}
+_MACRO_CACHE_TTL_SECONDS = 300  # 5 minutes
+
+
+def _macro_bucket() -> int:
+    """Current 5-minute bucket — cache key."""
+    import time as _t
+    return int(_t.time()) // _MACRO_CACHE_TTL_SECONDS
+
+
+def _load_macro_context() -> tuple:
     """Load Nifty 50 returns and India VIX from the local DB.
 
-    Returns two DatetimeIndex-aligned Series (forward-filled to daily).
-    Falls back to zeros if data is unavailable so feature pipeline never breaks.
+    Returns a 4-tuple of pandas Series ``(nifty_ret, nifty_ma20, vix, vix_zscore)``
+    on success, or ``(None, None, None, None)`` if the underlying read
+    fails. Falls back gracefully so the feature pipeline never breaks.
+
+    Thread-safe via a TTL'd process-wide cache + lock — see module-level
+    comment for the P29 race rationale.
+    """
+    bucket = _macro_bucket()
+    cached = _MACRO_CACHE.get("bucket")
+    if cached == bucket and _MACRO_CACHE.get("value") is not None:
+        return _MACRO_CACHE["value"]
+
+    with _MACRO_CACHE_LOCK:
+        # Re-check inside the lock — another thread may have populated.
+        cached = _MACRO_CACHE.get("bucket")
+        if cached == bucket and _MACRO_CACHE.get("value") is not None:
+            return _MACRO_CACHE["value"]
+        value = _read_macro_context_uncached()
+        # Only cache successful reads; falling back to a None-tuple
+        # should not poison the cache for the rest of the bucket.
+        if value[0] is not None:
+            _MACRO_CACHE["bucket"] = bucket
+            _MACRO_CACHE["value"] = value
+        return value
+
+
+def _read_macro_context_uncached() -> tuple:
+    """Uncached underlying read — opens an isolated SQLite connection per call.
+
+    Skips ``data.database.load_ohlcv`` and reads the two macro symbols
+    inline with one connection. Keeps the read path fully isolated from
+    any shared module state and minimises wall-time the connection is
+    held open.
     """
     try:
-        from data.database import load_ohlcv
-        nifty = load_ohlcv("^NSEI")["close"]
+        import sqlite3
+        from config import DB_PATH
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        try:
+            sql = (
+                "SELECT time, close FROM ohlcv "
+                "WHERE symbol = ? AND resolution = ? ORDER BY time ASC"
+            )
+            nifty_df = pd.read_sql_query(
+                sql, conn, params=["^NSEI", "1d"], parse_dates=["time"]
+            )
+            vix_df = pd.read_sql_query(
+                sql, conn, params=["^INDIAVIX", "1d"], parse_dates=["time"]
+            )
+        finally:
+            conn.close()
+        if nifty_df.empty or vix_df.empty:
+            return (None, None, None, None)
+        nifty = nifty_df.set_index("time")["close"]
+        vix = vix_df.set_index("time")["close"]
         nifty_ret = nifty.pct_change().rename("nifty_return")
         nifty_ma20 = (nifty / nifty.rolling(20).mean() - 1).rename("nifty_vs_ma20")
-        vix = load_ohlcv("^INDIAVIX")["close"].rename("india_vix")
-        vix_zscore = ((vix - vix.rolling(60).mean()) / (vix.rolling(60).std() + 1e-9)).rename("vix_zscore")
+        vix = vix.rename("india_vix")
+        vix_zscore = (
+            (vix - vix.rolling(60).mean()) / (vix.rolling(60).std() + 1e-9)
+        ).rename("vix_zscore")
         return nifty_ret, nifty_ma20, vix, vix_zscore
     except Exception:
-        return None, None, None, None
+        return (None, None, None, None)
 
 
 def compute_intraday_features(df: pd.DataFrame) -> pd.DataFrame:
