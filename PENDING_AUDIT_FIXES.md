@@ -1537,6 +1537,49 @@ Main thread:
 
 ---
 
+## P32. Windows watchdog scheduled task cadence drifted from 5-min to ~40-min (LOW-MEDIUM)
+
+**Symptom (Mon May 18, 12:45 → 13:24 IST):** `NSE_Engine_Watchdog` task last fired at 12:45:01 IST. Next scheduled fire at 13:25:00 IST per `schtasks /Query` — **40-minute gap instead of the expected 5-min cadence**.
+
+**Task state at observation time:**
+
+```
+schtasks /Query /TN "NSE_Engine_Watchdog" /V /FO LIST
+  Status:               Ready
+  Scheduled Task State: Enabled
+  Last Run Time:        18-05-2026 12:45:01
+  Next Run Time:        18-05-2026 13:25:00     ← +40 min, not +5 min
+```
+
+**watchdog.log confirms the gap:** entries every ~5 min from earliest fire through 12:45, then complete silence.
+
+**Suspected cause:** when ops re-enabled the task today at ~10:58 IST (via `schtasks /Change /ENABLE`), Windows Task Scheduler may have applied the trigger differently than the original creation. The original `Schedule Type: One Time Only, Minute` description suggests a trigger with `RepetitionInterval=PT5M` and `RepetitionDuration=PT24H` (or similar). When the task was disabled this morning, the in-progress repetition cycle may have been lost; re-enable may not have restored it cleanly.
+
+**Why it matters:**
+- Watchdog is the safety net that catches engine crashes and triggers restart within 5 min
+- With a 40-min cadence, a crash at minute 6 of a window means the engine is dead for 34 min before recovery
+- Engine could miss multiple trade signals + skip the 15:15 force-close window entirely
+- Today is fine because engine hasn't crashed — but this defeats the whole point of watchdog protection
+
+**Why low-medium not high:**
+- Engine has been crash-free since Round 3 deploy (2h 19m as of 13:24)
+- Round 3 fixes (P29) should make crashes rare going forward
+- Ops side has 15-min independent monitoring sweeps that backstop the watchdog gap
+
+**Required investigation / fix (ops side, not audit team — this is scheduled-task config, not code):**
+
+1. Inspect the task's XML definition via `schtasks /Query /TN "NSE_Engine_Watchdog" /XML > watchdog_task.xml` — look for `<Triggers>` block and verify `<TimeTrigger>` has proper `<Repetition>` with 5-min interval AND `<StopAtDurationEnd>false</StopAtDurationEnd>`.
+
+2. If trigger config is wrong, recreate the task via `schtasks /Create` (delete old + recreate with correct XML) rather than mutating with `/Change`. The XML-based create is more deterministic than enable/disable cycling.
+
+3. Add a daily sanity check: ops monitoring should log a WARNING if `watchdog.log` hasn't been written in > 10 min during market hours.
+
+**Acceptance:** After fix, `watchdog.log` should grow by exactly one entry every 5 min during market hours, with no gaps > 6 min.
+
+**Severity:** LOW-MEDIUM. Engine is currently stable so impact is academic. If engine starts crashing again, this becomes HIGH because recovery time blows up.
+
+---
+
 ## Notes for the audit team
 
 - Production today is running on the user's Windows laptop (8 GB RAM,
