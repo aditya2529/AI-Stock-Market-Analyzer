@@ -34,6 +34,39 @@ IST = ZoneInfo("Asia/Kolkata")
 # Fix 2: Per-symbol stop-loss cooldown — reset each session
 _sl_cooldown: set = set()   # symbols blocked for re-entry today after SL hit
 
+# P30: persist the cooldown to paper_config keyed by date — mirrors P20's
+# forced_closed_<date> pattern. Before this, every engine restart
+# (watchdog-triggered or otherwise) wiped the in-memory set, so a
+# crash-loop scenario re-entered every recently-stopped symbol within
+# the same trading day. May 18: AMBUJACEM.NS hit SL, crash, restart,
+# fresh cooldown, AMBUJACEM re-opened, hit SL again — two losses on
+# the same symbol totalling -₹1,427 in ~10 min.
+_SL_COOLDOWN_KEY_FMT = "sl_cooldown_{date}"
+
+
+def _load_sl_cooldown_for_today() -> set:
+    """Load today's SL cooldown from paper_config — survives restarts."""
+    from paper_trading.portfolio import get_config
+    key = _SL_COOLDOWN_KEY_FMT.format(date=date.today().isoformat())
+    raw = get_config(key, "")
+    return set(s for s in (raw or "").split(",") if s)
+
+
+def _add_to_sl_cooldown(symbol: str) -> None:
+    """Add a symbol to the cooldown AND persist to paper_config.
+
+    Updates both the in-memory set (for fast lookup in the hot path)
+    and the persisted key (so a restart inherits the same-day cooldown
+    via _load_sl_cooldown_for_today).
+    """
+    from paper_trading.portfolio import get_config, set_config
+    _sl_cooldown.add(symbol)
+    key = _SL_COOLDOWN_KEY_FMT.format(date=date.today().isoformat())
+    existing = get_config(key, "") or ""
+    symbols = set(s for s in existing.split(",") if s)
+    symbols.add(symbol)
+    set_config(key, ",".join(sorted(symbols)))
+
 
 def _ist_now() -> datetime:
     return datetime.now(IST)
@@ -137,8 +170,10 @@ def _process_symbol(symbol: str, ensemble, portfolio_value: float) -> dict | Non
         result = try_close(symbol, current_price, "HOLD")
         if result:
             # Fix 2: add to cooldown if exit was stop-loss
+            # P30: _add_to_sl_cooldown persists to paper_config so a
+            # restart in the same session does NOT re-enter this symbol.
             if result.get("exit_reason") == "stop_loss":
-                _sl_cooldown.add(symbol)
+                _add_to_sl_cooldown(symbol)
                 logger.info("SL cooldown: %s blocked for rest of session", symbol)
             from alerts.dispatcher import on_trade_closed
             on_trade_closed(result)
@@ -314,9 +349,17 @@ def run_intraday_session(symbols: list[str], ensemble, portfolio_value: float = 
     )
     from alerts.dispatcher import on_portfolio_snapshot
 
-    _sl_cooldown.clear()   # Fix 2: fresh cooldown each session
     _FETCH_CACHE.clear()   # Q5: fresh fetch cache each session
     init_paper_tables()
+    # P30: rehydrate today's SL cooldown from paper_config. A watchdog
+    # restart mid-session must NOT reset the cooldown — otherwise any
+    # symbol that hit SL before the restart is eligible for re-entry,
+    # which is exactly the AMBUJACEM double-stop scenario from May 18.
+    _sl_cooldown.clear()
+    _sl_cooldown.update(_load_sl_cooldown_for_today())
+    if _sl_cooldown:
+        logger.info("P30: rehydrated SL cooldown from paper_config — %d symbol(s): %s",
+                    len(_sl_cooldown), sorted(_sl_cooldown))
     if get_config("cash") is None:
         set_cash(portfolio_value)
         set_config("peak_value", portfolio_value)
