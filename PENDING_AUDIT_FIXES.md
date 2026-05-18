@@ -1367,6 +1367,119 @@ if today_count >= DAILY_TRADE_CAP:
 
 ---
 
+## P29. P24 fix is INCOMPLETE — `_load_macro_context` still uses shared SQLite connection (CRITICAL)
+
+**Symptom (Mon May 18, 09:35–10:00 IST):** Engine crashed **6 times in 30 min** despite Round 2's P24 fix (`2643b42`) being deployed. Exit codes: `0xc0000374 ×3` + `0xc0000005 ×3`. Watchdog kept restarting; each restart triggered another BUY, which triggered another crash.
+
+**Smoking gun from `logs/faulthandler.log` (multiple identical worker-thread stacks):**
+
+```
+Thread 0x00005a4c (most recent call first):
+  File "pandas/io/sql.py", line 2758 in _fetchall_as_list
+  File "pandas/io/sql.py", line 2743 in read_query
+  File "pandas/io/sql.py", line 528 in read_sql_query
+  File "data/database.py", line 62 in load_ohlcv
+  File "features/engineer.py", line 156 in _load_macro_context  ← STILL FIRING
+  File "features/engineer.py", line 269 in engineer_features
+  File "intraday/engine.py", line 125 in _process_symbol
+  File "concurrent/futures/thread.py", line 58 in run
+```
+
+**Root cause:** Round 2's P24 fix added per-call `sqlite3.connect()` to `data/database.py:load_ohlcv()` — good. But `features/engineer.py:_load_macro_context` at lines 156 and 159 makes ITS OWN calls to `read_sql_query` or holds onto a shared connection that wasn't fixed. The audit team patched ONE call site (the main OHLCV fetch) but missed the macro-context loader.
+
+`_load_macro_context` runs on EVERY symbol tick, in EVERY worker thread, on every feature engineering call. With 8 workers fanning out, it's the dominant SQLite-race trigger surface — far more frequent than the main OHLCV fetch path that Round 2 fixed.
+
+**Required fix (audit team):**
+
+1. Open `features/engineer.py` at line ~156 and 159. Identify whatever DB read path is used by `_load_macro_context`.
+2. Apply the SAME per-call connection pattern Round 2 used in `data/database.py`:
+   - Open a fresh `sqlite3.connect(DB_PATH, check_same_thread=False)` inside the function
+   - Do the read
+   - Close it in a `finally` clause
+3. Audit ALL other `read_sql_query` / `pd.read_sql` call sites in the codebase — grep `grep -rn "read_sql" .` and verify every single one uses the per-call pattern.
+
+**This is a process-discipline failure, not just a code defect.** Round 2's regression test `tests/test_p24_buy_path.py::test_concurrent_load_ohlcv_no_crash` only exercised the `load_ohlcv` path. It didn't exercise `_load_macro_context` separately. The test passed because the fixed call site was the only one tested. Round 3's test must cover EVERY thread-entry into SQLite.
+
+**Required regression test (must FAIL on parent commit, PASS on fix):**
+
+```python
+# tests/test_p29_macro_context_thread_safe.py
+def test_concurrent_load_macro_context_no_crash():
+    """Reproduces P29 — N threads loading macro context concurrently."""
+    from features.engineer import _load_macro_context
+    from concurrent.futures import ThreadPoolExecutor
+    def call_it():
+        return _load_macro_context()
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        results = list(ex.map(lambda _: call_it(), range(32)))
+    assert all(r is not None for r in results)
+```
+
+**Live impact (May 18):** Crash loop ran from 09:35 to 10:00 IST. Engine + watchdog disabled by ops at 10:05 IST. 5 open positions manually force-closed at last 5-min bar prices, tagged `exit_reason="manual_force_close_p24_crash_loop"`. Day-5 P&L: **-₹1,381 net** (₹1,427 from AMBUJACEM double-stop + ₹46 from forced closures).
+
+**Severity:** CRITICAL. Engine is functionally unusable until this lands. Scheduled tasks remain DISABLED until Round 3 ships and verifies.
+
+**Acceptance gate:** Beyond passing the regression test, run the engine for 30 min during off-market hours (which still exercises `_load_macro_context` on every tick). `logs/faulthandler.log` must NOT grow. `Get-EventLog -LogName Application -Source "Application Error"` must show NO new `0xc0000374` or `0xc0000005` events for `python.exe`.
+
+---
+
+## P30. SL cooldown wipes on every engine restart → same symbol re-entered after stop-loss (HIGH)
+
+**Symptom (Mon May 18, 09:35–10:00 IST):** AMBUJACEM.NS opened, hit stop-loss, was added to in-memory `_sl_cooldown` set. Engine crashed (P29). Watchdog restarted. New process has FRESH (empty) `_sl_cooldown`. Engine immediately re-opened AMBUJACEM.NS at the next BUY signal. **Stopped out again.** Two identical losses on the same symbol within ~10 minutes: -₹712 + -₹715 = **-₹1,427**.
+
+**Root cause:** `intraday/engine.py:34` declares `_sl_cooldown: set = set()` as a module-level Python set. It's pure in-memory state. The cooldown is correctly populated on SL exit (`engine.py:140`) but NOT persisted anywhere. Every engine restart starts with an empty set — including watchdog-driven restarts during the same trading session.
+
+**Interaction with P24/P29:** This bug is dormant in a stable engine because the engine doesn't crash during a session. P29's crash loop activates it — every 5 minutes the cooldown gets wiped, opening the door to re-entry on every recently-stopped symbol. The two bugs compound.
+
+**Required fix:** persist the cooldown to `paper_config` keyed by date, the same way P20 persisted `forced_closed_<date>`:
+
+```python
+# intraday/engine.py — at module level
+_SL_COOLDOWN_KEY_FMT = "sl_cooldown_{date}"
+
+def _load_sl_cooldown_for_today() -> set:
+    """Load today's cooldown from paper_config — survives restarts."""
+    from datetime import date
+    from paper_trading.portfolio import get_config
+    key = _SL_COOLDOWN_KEY_FMT.format(date=date.today().isoformat())
+    raw = get_config(key, "")
+    return set(s for s in raw.split(",") if s)
+
+def _add_to_sl_cooldown(symbol: str):
+    """Add a symbol to the cooldown AND persist."""
+    from datetime import date
+    from paper_trading.portfolio import set_config, get_config
+    _sl_cooldown.add(symbol)
+    key = _SL_COOLDOWN_KEY_FMT.format(date=date.today().isoformat())
+    existing = get_config(key, "")
+    symbols = set(s for s in existing.split(",") if s)
+    symbols.add(symbol)
+    set_config(key, ",".join(sorted(symbols)))
+```
+
+Then in `run_intraday_session()`, replace `_sl_cooldown.clear()` with `_sl_cooldown.update(_load_sl_cooldown_for_today())` — so a restart inherits the same-day cooldown set.
+
+**Required regression test:**
+
+```python
+# tests/test_p30_sl_cooldown_persistence.py
+def test_sl_cooldown_survives_restart():
+    from intraday.engine import _add_to_sl_cooldown, _load_sl_cooldown_for_today
+    _add_to_sl_cooldown("RELIANCE.NS")
+    # Simulate restart by clearing in-memory set
+    from intraday.engine import _sl_cooldown
+    _sl_cooldown.clear()
+    # Restart logic should reload from paper_config
+    reloaded = _load_sl_cooldown_for_today()
+    assert "RELIANCE.NS" in reloaded
+```
+
+**Acceptance gate:** After fix, kill engine mid-session with an SL'd symbol in cooldown. Restart engine. Confirm `_sl_cooldown` is repopulated from `paper_config` and that symbol cannot be re-entered.
+
+**Severity:** HIGH. Caused -₹715 (the second AMBUJACEM loss) today. Will fire again on any future crash-loop scenario. Less critical than P29 (which causes the crashes) but they should ship together.
+
+---
+
 ## Notes for the audit team
 
 - Production today is running on the user's Windows laptop (8 GB RAM,
