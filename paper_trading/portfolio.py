@@ -173,14 +173,21 @@ def close_position(symbol: str, exit_price: float, exit_reason: str) -> dict:
     net_pnl = exit_proceeds_net - entry_cost_with_fees
     return_pct = net_pnl / entry_cost_with_fees
 
+    # P35: carry confidence + regime from paper_positions into paper_trades on close,
+    # so the trade history can show what conviction the model had at entry. Without
+    # this carry, the historical view loses all entry-side context the moment a trade
+    # closes (the paper_positions row is deleted right after this INSERT).
+    pos_conf = pos.get("confidence")
+    pos_regime = pos.get("regime")
     with get_connection() as conn:
         conn.execute(
             """INSERT INTO paper_trades
                (symbol, entry_time, exit_time, entry_price, exit_price, shares,
-                gross_pnl, net_pnl, return_pct, exit_reason)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                gross_pnl, net_pnl, return_pct, exit_reason, confidence, regime)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (symbol, pos["entry_time"], datetime.utcnow().isoformat(),
-             entry_price, exit_price, shares, gross_pnl, net_pnl, return_pct, exit_reason)
+             entry_price, exit_price, shares, gross_pnl, net_pnl, return_pct, exit_reason,
+             pos_conf, pos_regime)
         )
         conn.execute("DELETE FROM paper_positions WHERE symbol = ?", (symbol,))
 

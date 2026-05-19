@@ -583,11 +583,14 @@
         <thead>
           <tr>
             <th>Market</th><th>Symbol</th><th>Entry Time</th><th>Exit Time</th>
-            <th>Shares</th><th>Entry</th><th>Exit</th><th>Net P&amp;L</th><th>Return</th><th>Exit Reason</th>
+            <th>Shares</th><th>Entry</th><th>Exit</th><th>Net P&amp;L</th><th>Return</th>
+            <th title="Model confidence at entry — only available for trades opened after P35 deploy">Conf</th>
+            <th title="Market regime detected at entry — TRENDING_UP / SIDEWAYS / TRENDING_DOWN / HIGH_VOL">Regime</th>
+            <th>Exit Reason</th>
           </tr>
         </thead>
         <tbody id="trades-table">
-          <tr><td colspan="10" style="color:var(--muted);text-align:center;padding:20px">No closed trades yet</td></tr>
+          <tr><td colspan="12" style="color:var(--muted);text-align:center;padding:20px">No closed trades yet</td></tr>
         </tbody>
       </table>
       <div id="trades-pagination" style="display:flex;align-items:center;justify-content:center;gap:6px;margin-top:14px;flex-wrap:wrap"></div>
@@ -1041,6 +1044,13 @@ function renderTrades() {
     const pos = t.net_pnl >= 0;
     const col = pos ? 'var(--green)' : 'var(--red)';
     const warn = anomalyFlag(t.return_pct||0);
+    // P35: confidence + regime — backfilled NULL for trades closed before May 19 09:50 IST.
+    const confDisplay = (t.confidence != null)
+      ? `<span class="mono" style="color:${t.confidence >= 0.70 ? 'var(--green)' : t.confidence >= 0.60 ? 'var(--cyan)' : 'var(--label)'};font-weight:600">${(t.confidence * 100).toFixed(0)}%</span>`
+      : `<span style="color:var(--muted)">—</span>`;
+    const regimeDisplay = t.regime
+      ? `<span class="mono" style="font-size:11px;color:${t.regime === 'TRENDING_UP' ? 'var(--green)' : t.regime === 'TRENDING_DOWN' ? 'var(--red)' : t.regime === 'HIGH_VOL' ? 'var(--amber)' : 'var(--label)'}">${t.regime}</span>`
+      : `<span style="color:var(--muted)">—</span>`;
     return `<tr>
       <td>${marketTag(t.symbol)}</td>
       <td class="mono" style="font-weight:700;color:var(--text)">${t.symbol}</td>
@@ -1051,6 +1061,8 @@ function renderTrades() {
       <td class="mono">${fmtM(t.exit_price,usd(t.symbol))}</td>
       <td class="mono" style="color:${col};font-weight:700">${fmtPM(t.net_pnl,usd(t.symbol))}</td>
       <td class="mono" style="color:${col}">${fmtPP(t.return_pct)}${warn}</td>
+      <td>${confDisplay}</td>
+      <td>${regimeDisplay}</td>
       <td>${exitBadge(t.exit_reason)}</td>
     </tr>`;
   }).join('');
