@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 import logging
 import json
+import threading
 from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
@@ -19,6 +20,17 @@ _LABEL_IDX = {"BUY": 0, "HOLD": 1, "SELL": 2}
 # on every signal call. Keyed by id(model) so swapping ensembles invalidates safely.
 _EXPLAINER_CACHE: dict = {}
 
+# P33 (Round 4 hot-patch, May 19): SHAP TreeExplainer + xgboost Booster.predict
+# are NOT thread-safe. Multiple workers calling _shap_reasons concurrently on the
+# same BUY tick caused heap corruption (0xc0000374) / access violation
+# (0xc0000005) in xgboost's C code. Faulthandler captured the stack on May 19
+# 09:15:12 + 09:20:32 IST showing 8 worker threads inside shap_values + predict.
+# Round 3 fixed SQLite races but left this one untouched. Until a proper fix
+# (per-thread explainer cache or subprocess isolation) lands, serialize the
+# SHAP+predict call with a module-level lock. Cost: ~50-200ms per BUY because
+# only one worker can run SHAP at a time. Worth it vs the engine dying.
+_SHAP_LOCK = threading.Lock()
+
 
 def _get_explainer(model):
     key = id(model)
@@ -28,11 +40,15 @@ def _get_explainer(model):
 
 
 def _shap_reasons(ensemble: Ensemble, df_row: pd.DataFrame, signal: str, top_n: int = 3) -> list[str]:
-    """Return top-N human-readable SHAP reasons for the XGBoost signal layer decision."""
+    """Return top-N human-readable SHAP reasons for the XGBoost signal layer decision.
+
+    P33: wrapped in _SHAP_LOCK because SHAP+xgboost.predict() are not thread-safe.
+    """
     feature_cols = [c for c in FEATURE_COLUMNS if c in df_row.columns]
     try:
         explainer = _get_explainer(ensemble.signal_layer.model)
-        shap_values = explainer.shap_values(df_row[feature_cols])
+        with _SHAP_LOCK:
+            shap_values = explainer.shap_values(df_row[feature_cols])
         # shap_values shape: (n_classes, n_samples, n_features) or (n_samples, n_features) for binary
         cls_idx = _LABEL_IDX.get(signal, 1)
         if isinstance(shap_values, list):
