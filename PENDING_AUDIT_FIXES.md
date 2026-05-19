@@ -1677,6 +1677,55 @@ Test must FAIL on parent of `89b7eaf` (no lock) and PASS on `89b7eaf` (with lock
 
 ---
 
+## P34. Missing test layers — no stress tests, no replay tests (HIGH — root cause of repeated production-discovery)
+
+**The meta-problem this round.** The reason P33 (SHAP race) survived 3 audit rounds and only surfaced in live Tuesday-morning trading is that **we don't have any test layer that exercises concurrent C-extension calls under realistic load**. Same gap caused P29 to be misdiagnosed as P9 in Rounds 1-2. Same gap will cause Round 4's next-bug-after-P33 to also slip through.
+
+The 42 existing tests in `tests/` are all sequential unit tests. They check "does this function return the right value?" — not "does this function survive 8 workers calling it simultaneously 100 times in a row?"
+
+**What's missing — two distinct test directories:**
+
+### Directory 1: `tests/stress/` — concurrent C-extension stress tests
+
+For every code path that calls a C-extension (xgboost, SHAP, SQLite via pandas, urllib SSL, curl_cffi via yfinance), add a test that runs that path from 8+ worker threads in a tight loop. If the C-extension has a thread-safety bug, the stress test will surface it within 100 iterations.
+
+Required coverage (one test per call site):
+- `tests/stress/test_shap_concurrent.py` — replays P33 with `_shap_reasons` under 8 workers
+- `tests/stress/test_xgboost_predict_concurrent.py` — direct `ensemble.signal_layer.predict` under 8 workers
+- `tests/stress/test_sqlite_concurrent.py` — replays P29 (already exists as `test_p24_buy_path.py`, move + rename)
+- `tests/stress/test_yfinance_concurrent.py` — concurrent `yf.Ticker.history` calls (P31 territory)
+- `tests/stress/test_telegram_concurrent.py` — concurrent `send_message` (touches urllib SSL)
+
+Each test: ThreadPoolExecutor(max_workers=8), iterate 100×, assert process survives. Should fail-loudly on heap corruption / access violation by checking `Get-EventLog` for new entries after the run (Windows-specific guard).
+
+### Directory 2: `tests/replay/` — actual market-data replay
+
+Save 1 day of fully-recorded ticks + bars + signals + trades to a fixture file (~50 MB). Build a replay harness that feeds those ticks into the engine in-process and asserts the exact same trades fire with the same prices and the same exits.
+
+Required fixtures:
+- `tests/replay/fixtures/2026-05-18.tar.gz` — Monday's clean day (cleanest reference)
+- `tests/replay/fixtures/2026-05-19_morning.tar.gz` — Tuesday morning's chaos (regression test for the crash loop — should now run clean post-P33 fix)
+
+Test asserts:
+- Same number of BUYs fire
+- Same exit prices on each closed trade
+- Final `nse_cash` matches the fixture's recorded value
+- Zero new entries in Windows Event Log after the run
+
+**Effort estimate:** ~2-3 days total. Stress dir is ~1 day (per-callsite ~1-2 hr × 5 sites). Replay dir is ~1.5 days (fixture builder + harness + 2 fixtures).
+
+**Cost-benefit:** every bug caught here costs ~₹0 (weekend coding time). Same bug caught in live trading costs ~₹500-2,000 (today's P33 already cost ~₹1,000+ in messy trades). Pays for itself within the first ~3 bugs caught.
+
+**Why this is HIGH priority not LOW:**
+- Round 4 will fix P33 properly (per-thread cache or subprocess). Without P34's stress tests, **Round 4's fix is unverifiable** the same way Round 3's was. We'd be re-running the same play: "fix lands, looks green, ships, blows up on the first multi-BUY tick."
+- P34 + P33 should ship as a bundle: write the failing stress test first, then the proper fix, then verify the test passes. Same discipline AUDIT_ROUND_2_BRIEF.md mandated for regression tests.
+
+**Severity:** HIGH — meta-bug. Every future round will keep missing the same class of bug until this lands.
+
+**Acceptance:** All 5 stress tests + at least 1 replay test exist and pass. Audit team confirms the new tests are wired into the pre-push verification gate.
+
+---
+
 ## Notes for the audit team
 
 - Production today is running on the user's Windows laptop (8 GB RAM,
