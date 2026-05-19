@@ -35,7 +35,9 @@ def init_paper_tables():
                 gross_pnl       REAL NOT NULL,
                 net_pnl         REAL NOT NULL,
                 return_pct      REAL NOT NULL,
-                exit_reason     TEXT NOT NULL
+                exit_reason     TEXT NOT NULL,
+                confidence      REAL,                -- P35: entry-time conviction
+                regime          TEXT                  -- P35: market regime at entry
             );
 
             CREATE TABLE IF NOT EXISTS paper_portfolio_log (
