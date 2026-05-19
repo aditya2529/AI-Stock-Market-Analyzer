@@ -180,9 +180,47 @@
       .market-charts{grid-template-columns:1fr}
     }
     @media(max-width:768px){
-      .metrics-row{grid-template-columns:repeat(2,1fr)}
+      /* Force everything to single or 2-column on tablet */
+      .metrics-row{grid-template-columns:repeat(2,1fr) !important}
       .header-center{display:none}
       .mini-metrics{grid-template-columns:repeat(2,1fr)}
+      .charts-row{grid-template-columns:1fr !important}
+      .market-charts{grid-template-columns:1fr !important}
+      /* Tables horizontally scrollable instead of breaking layout */
+      table{display:block;overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch}
+      table thead,table tbody,table tr{display:table;width:100%;table-layout:auto}
+      /* Card padding tightens */
+      .card{padding:12px !important}
+      /* Tab nav scrolls horizontally if too wide */
+      .tab-nav{overflow-x:auto;-webkit-overflow-scrolling:touch;flex-wrap:nowrap}
+      .tab-btn{padding:10px 14px;font-size:11px;white-space:nowrap;flex-shrink:0}
+      /* Watchlist tighter */
+      .watchlist-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
+      /* Signal lookup card — stack input + button */
+      #signal-lookup-card > div:first-of-type{flex-direction:column;align-items:stretch}
+      #signal-lookup-card input{min-width:0 !important;width:100%}
+      #signal-lookup-card button{width:100%}
+    }
+    @media(max-width:480px){
+      /* Phone: single-column metrics + tight typography */
+      .metrics-row{grid-template-columns:1fr !important}
+      .mini-metrics{grid-template-columns:1fr}
+      body{font-size:12px}
+      .metric-val{font-size:18px !important}
+      .metric-label{font-size:9px !important}
+      .metric-sub{font-size:10px !important}
+      /* Force-override inline 4-col grids that bypass class rules */
+      [style*="grid-template-columns:repeat(4,1fr)"]{grid-template-columns:1fr !important}
+      [style*="grid-template-columns:repeat(3,1fr)"]{grid-template-columns:1fr !important}
+      /* Sentiment card stacks */
+      #sentiment-card{flex-direction:column !important;align-items:flex-start !important}
+      #sentiment-verdict{font-size:20px !important}
+      /* Larger tap targets */
+      .tab-btn{min-height:44px;padding:12px 16px}
+      button,input,select{min-height:40px}
+      /* Hide less-essential columns to reduce horizontal scroll burden */
+      table th:nth-child(3),table td:nth-child(3),
+      table th:nth-child(4),table td:nth-child(4){display:none}
     }
 
     /* ─── Tab nav ─── */
