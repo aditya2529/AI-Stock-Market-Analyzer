@@ -1580,6 +1580,103 @@ schtasks /Query /TN "NSE_Engine_Watchdog" /V /FO LIST
 
 ---
 
+## P33. SHAP TreeExplainer + xgboost.Booster.predict() race in BUY path (CRITICAL — hot-patched by ops)
+
+**Status:** HOT-PATCHED by ops in commit `89b7eaf` (one `threading.Lock` around the SHAP call). Audit team should formalize with a real fix in Round 4 (per-thread cache or subprocess isolation).
+
+**Symptom (Tue May 19, 09:15:12 + 09:20:32 IST):** Engine crashed **twice in 5 minutes** on Round-3 code that had been stable through all of Monday afternoon. Exit codes: `0xc0000005` (access violation) + `0xc0000374` (heap corruption) — both within 4 sec of a BUY trade firing.
+
+**Smoking gun from `logs/faulthandler.log` (~5 worker threads showing identical frames):**
+
+```
+Windows fatal exception: code 0xc0000374
+
+Thread 0x00006494 (representative — 4 more identical):
+  File "xgboost/core.py", line 2716 in predict
+  File "shap/explainers/_tree.py", line 599 in shap_values
+  File "signals/generator.py", line 35 in _shap_reasons
+  File "signals/generator.py", line 90 in generate_signal
+  File "intraday/engine.py", line 352 in _process_symbol
+  [ThreadPoolExecutor worker]
+```
+
+**Root cause:** the module-level `_EXPLAINER_CACHE` in `signals/generator.py` returns the SAME `shap.TreeExplainer` instance to every worker. `explainer.shap_values()` internally calls `xgboost.Booster.predict()` which **is not thread-safe**. When 5–8 workers fan out on a tick where multiple symbols want BUYs, they all hit the cached explainer simultaneously, corrupt xgboost's C-level prediction state, and the OS kills the process.
+
+**This was flagged in `AUDIT_ROUND_2_BRIEF.md` as Suspect #1** for the P24 investigation, but the audit team's Round 3 fix only addressed the SQLite race (`_load_macro_context`). The SHAP race survived Round 3 unaddressed — and showed up the moment a market session had multiple high-confidence BUYs in the same tick.
+
+**Why it didn't fire all of Monday afternoon:** Monday post-Round-3 had only ~3 BUYs total (NCC, plus a few others). They never coincided on the same tick. Tuesday morning fired 5+ BUYs across the first two ticks — the SHAP cache got hammered, race triggered.
+
+**Hot-patch applied (commit `89b7eaf`):**
+
+```python
+# signals/generator.py
+import threading
+_SHAP_LOCK = threading.Lock()
+
+def _shap_reasons(ensemble, df_row, signal, top_n=3):
+    ...
+    explainer = _get_explainer(ensemble.signal_layer.model)
+    with _SHAP_LOCK:
+        shap_values = explainer.shap_values(df_row[feature_cols])
+    ...
+```
+
+**Cost:** ~50–200ms per BUY because only one worker runs SHAP at a time. With ~1-3 BUYs per tick, the serialization cost is negligible vs the alternative (engine dying).
+
+**Proper fixes for Round 4 (audit team — pick one):**
+
+1. **Per-thread explainer cache** — `threading.local()` storing a TreeExplainer per worker. Eliminates contention entirely.
+
+   ```python
+   _LOCAL = threading.local()
+   def _get_explainer(model):
+       if not hasattr(_LOCAL, 'cache'):
+           _LOCAL.cache = {}
+       if id(model) not in _LOCAL.cache:
+           _LOCAL.cache[id(model)] = shap.TreeExplainer(model)
+       return _LOCAL.cache[id(model)]
+   ```
+
+   ~10 LOC, no serialization cost. Memory cost: ~50 MB × 8 workers = 400 MB additional RAM. Tolerable on 8 GB.
+
+2. **Subprocess isolation** — run `generate_signal` in `multiprocessing.Process`. Heavyweight (~300ms startup per call) but bulletproof.
+
+3. **Skip SHAP for high-confidence trades** — if confidence > 0.80, skip the SHAP explanation entirely (use a generic reason string). Sidesteps the issue for the trades you care about most.
+
+**Required regression test (audit team in Round 4):**
+
+```python
+# tests/test_p33_shap_thread_safe.py
+def test_concurrent_shap_reasons_no_crash():
+    """Reproduces P33 — N threads calling _shap_reasons concurrently must not crash."""
+    from signals.generator import _shap_reasons
+    from models.ensemble import load_ensemble
+    import pandas as pd
+    from concurrent.futures import ThreadPoolExecutor
+    
+    ensemble = load_ensemble("models/saved/ensemble_intraday.pkl")
+    # Build a fixture df_row with all FEATURE_COLUMNS
+    df_row = ...
+    
+    def call_it(_):
+        return _shap_reasons(ensemble, df_row, "BUY")
+    
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        results = list(ex.map(call_it, range(32)))
+    assert all(isinstance(r, list) for r in results)
+```
+
+Test must FAIL on parent of `89b7eaf` (no lock) and PASS on `89b7eaf` (with lock).
+
+**Severity:** CRITICAL. Was actively breaking the engine until the hot-patch landed.
+
+**Live impact (May 19):**
+- Engine crashed 2× before the patch (09:15:12, 09:20:32)
+- After hot-patch deploy (89b7eaf pushed ~09:30 IST) and engine restart, expect zero further P33 crashes
+- One winning trade got through anyway: TECHM.NS +₹1,003.54 at target
+
+---
+
 ## Notes for the audit team
 
 - Production today is running on the user's Windows laptop (8 GB RAM,
