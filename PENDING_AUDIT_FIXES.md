@@ -1796,6 +1796,72 @@ Test asserts:
 
 ---
 
+## P39. xgboost.Booster.predict() race in non-SHAP signal path (LATENT — uncovered by P33 SHAP disable)
+
+**Status:** Not yet observed in production but anticipated. Stress tests `tests/stress/test_xgboost_predict_concurrent.py` are skipped pending this fix; auto-re-enable when proper fix lands.
+
+**Background.** Arjun's gotcha note flagged this at the close of Round 4: *"xgboost-direct race is real but out of scope. The fact that the engine survived in production this far is because `_shap_reasons` crashed FIRST. Once P33 fixes that, the next time multiple BUYs hit the same tick, the booster's own race will surface."* P33 disabled SHAP entirely (commit `f590bb1` May 20), removing the always-first crash. The xgboost-direct race is now the most likely next crash class.
+
+**The mechanism.** `intraday/engine.py:_process_symbol()` calls `ensemble.predict_with_confidence(featured)` for every symbol on every tick. With 8 ThreadPoolExecutor workers, up to 8 symbols are predicted concurrently. The underlying `xgboost.Booster` object inside `ensemble.signal_layer.model` is shared across all workers. xgboost's C-level state (feature_names lookup, prediction buffers, data conversion) is not thread-safe under that pattern → expect heap corruption / access violation on multi-BUY ticks where several symbols simultaneously enter predict.
+
+**Why it hasn't fired yet:** SHAP racing always crashed first, masking this. From May 20 onward (post-P33 SHAP-disable), the race is unmasked but only triggers when 2+ workers enter predict at the exact same instant, which happens on ticks with multiple high-confidence signals. Wednesday afternoon was bearish-leaning (mostly SELL signals ignored by long-only) so no multi-BUY tick fired.
+
+**Five fix paths (ranked cheapest → bulletproof):**
+
+| # | Approach | Effort | Cost | Confidence |
+|---|---|---|---|---|
+| 1 | Lock around `ensemble.predict_with_confidence()` | ~5 LOC | ~50-200ms serialization per BUY | Medium — same approach failed for SHAP lock variant 3 |
+| 2 | **Per-thread booster copy** at engine startup — each worker clones the xgboost.Booster, never shares | ~20 LOC | ~50 MB extra RAM (8 × ~6 MB model) | High — true thread isolation, no shared state |
+| 3 | Subprocess isolation — predict in a separate Python process per BUY | ~30 LOC | +300ms startup per call | Bulletproof |
+| 4 | Drop ThreadPoolExecutor entirely — sequential predict for all 50 symbols | Big refactor | ~50s per tick (exceeds 5-min budget at high symbol count) | Bulletproof but likely too slow |
+| 5 | Downgrade xgboost to older thread-safe version | Quick | May lose features | Unknown until tested |
+
+**Recommended approach: skip straight to Option 2 (per-thread booster copy).** Lock variants are likely to fail the same way they failed for SHAP (the race is in xgboost data prep, not just at predict entry). Per-thread copy eliminates the shared state entirely. Memory cost (~50 MB) is well within the 8 GB laptop's budget.
+
+**Skeleton fix for `models/ensemble.py` or `signals/generator.py`:**
+
+```python
+import threading
+
+_LOCAL = threading.local()
+
+def _get_thread_local_ensemble(base_ensemble):
+    """Return a per-thread cloned ensemble. xgboost.Booster supports copy()."""
+    if not hasattr(_LOCAL, 'ensemble'):
+        # Clone just the signal_layer booster (the racy one).
+        # LSTM + HMM + Meta layers don't race (they're pure-Python or read-only).
+        cloned_booster = base_ensemble.signal_layer.model.copy()
+        # Build a shallow ensemble copy that swaps in the cloned booster
+        _LOCAL.ensemble = base_ensemble.with_signal_booster(cloned_booster)
+    return _LOCAL.ensemble
+```
+
+Then in `_process_symbol`, replace `ensemble.predict_with_confidence(featured)` with `_get_thread_local_ensemble(ensemble).predict_with_confidence(featured)`.
+
+**If `Booster.copy()` is unavailable on this xgboost version**, fall back to `pickle.loads(pickle.dumps(booster))` per worker. Slightly more expensive on first call but bulletproof.
+
+**Verification (audit team must add):**
+
+`tests/stress/test_xgboost_predict_concurrent.py` is already in place with 2 tests marked skipped pending this fix. When Option 2 lands, remove the skipif gate and re-run. Both tests must pass:
+
+```python
+def test_predict_with_confidence_8_workers_no_crash():
+    """Direct ensemble.predict_with_confidence under 8 workers, 200 calls."""
+    ...
+
+def test_predict_under_load_16_workers_no_crash():
+    """16 workers / 500 calls — bumped intensity if 8/200 doesn't repro."""
+    ...
+```
+
+Plus a 15-min off-market run with multiple symbols feeding through `_process_symbol`. Zero new `0xc0000374` / `0xc0000005` events in Windows Event Log.
+
+**Severity:** Critical for tomorrow's market open IF a multi-BUY tick fires (~30% probability based on this week's pattern). Watchdog will catch any crash that does happen, but the pattern is the same Monday-morning playbook we've seen 3 times this week. **Bundle with P37 (SHAP revival) for Round 5** — same library family, same fix toolkit, same verification harness.
+
+**Acceptance:** Stress tests un-gate and pass + 1 full clean trading session (09:10 → 15:30 IST, zero crashes, zero faulthandler growth) with at least one multi-BUY tick observed.
+
+---
+
 ## Notes for the audit team
 
 - Production today is running on the user's Windows laptop (8 GB RAM,
