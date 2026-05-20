@@ -1763,6 +1763,39 @@ Test asserts:
 
 ---
 
+## P38. Engine lingers 2+ hours past expected exit (curl_cffi non-daemon threads block Python shutdown)
+
+**Symptom (Wed May 20):** Engine PID 13324 booted via watchdog at 10:55:05 IST. Force-close branch fired correctly at 15:15 IST (log shows `"Day complete. Waiting for market close…"`). After the designed `time.sleep(900)` + `break`, the engine should have exited around 15:30 IST. **Instead it stayed alive until ~17:51 IST** — about 2h 21m past expected exit. No crashes, no work, no log entries during that window. Process eventually exited on its own around 17:54.
+
+**Watchdog log confirms:** `15:15:02 OK - engine alive (PID 13324)`, `15:20:01 OK - engine alive (PID 13324)`, `15:25:01 OK - engine alive (PID 13324)` — engine alive long after force-close completed.
+
+**Diagnosis:** Same library family as P31. After `run_intraday_session()` returns, Python's main thread waits for all non-daemon threads to terminate. `yfinance` uses `curl_cffi` for HTTP, which spawns connection-pool worker threads. Those threads hold long-lived keep-alive sockets with default timeouts that can stretch into hours. Until they finish or time out, the process refuses to exit.
+
+**Why this is NOT P31:**
+- P31 was an access violation crash (`0xc0000005`) on shutdown — fast death
+- P38 is the opposite — process hangs on shutdown, never dies (or dies very slowly)
+
+**Why this is low priority:**
+- Engine functionally complete (force-close fired, no positions stuck, no data damage)
+- Tomorrow's auto-boot spawns a fresh PID regardless — no interference
+- Cosmetic only — confuses monitoring (engine appears "alive" when it's actually idle waiting to die)
+
+**Proposed fixes (audit team — pick one when convenient):**
+
+1. **`sys.exit(0)` at end of `cmd_intraday()`** — 1-line addition in `main.py` after `run_intraday_session()` returns. Triggers an immediate clean shutdown via `SystemExit` exception. Worker threads get cleanup hooks called.
+
+2. **`os._exit(0)` — brutal version** — bypasses cleanup hooks entirely. Process terminates immediately. Use only if `sys.exit(0)` proves insufficient.
+
+3. **Mark yfinance pool threads as daemon** — would require wrapping/subclassing the executor. More invasive.
+
+4. **Upgrade `curl_cffi`** — combined with P31. If upstream fixed thread-shutdown issues, both bugs disappear.
+
+**Recommended:** option 1 (`sys.exit(0)`). Smallest blast radius, addresses the cosmetic issue cleanly.
+
+**Severity:** Low. Cosmetic. Bundle with P31 for next round.
+
+---
+
 ## Notes for the audit team
 
 - Production today is running on the user's Windows laptop (8 GB RAM,
