@@ -71,11 +71,19 @@ def get_portfolio():
 
 @router.get("/trades")
 def get_trades(limit: int = 50):
-    """Last N closed trades."""
+    """Last N closed trades.
+
+    NaN / Inf in any float column (most often `confidence` for pre-P35 trades)
+    is converted to None before serialization — FastAPI's default JSON encoder
+    rejects NaN as non-compliant.
+    """
+    import numpy as np
     from paper_trading.portfolio import init_paper_tables, get_trade_history
     init_paper_tables()
     trades = get_trade_history()
-    return trades.head(limit).to_dict(orient="records")
+    return (trades.head(limit)
+                  .replace([np.nan, np.inf, -np.inf], None)
+                  .to_dict(orient="records"))
 
 
 @router.get("/equity")
