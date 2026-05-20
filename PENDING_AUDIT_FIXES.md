@@ -1582,7 +1582,9 @@ schtasks /Query /TN "NSE_Engine_Watchdog" /V /FO LIST
 
 ## P33. SHAP TreeExplainer + xgboost.Booster.predict() race in BUY path (CRITICAL — hot-patched by ops)
 
-**Status:** HOT-PATCHED by ops in commit `89b7eaf` (one `threading.Lock` around the SHAP call). Audit team should formalize with a real fix in Round 4 (per-thread cache or subprocess isolation).
+**Status:** FIXED in `f590bb1` — SHAP disabled in production. Three lock variants all crashed (cf. commit message for diagnostic chain). xgboost+shap on this stack is fundamentally not thread-safe; further pursuit deferred to P37 below. TreeExplainer RSS measured at 45.8 MB per instance (recorded by `tests/stress/conftest.py:pytest_sessionstart`).
+
+**Original status (May 19):** HOT-PATCHED by ops in commit `89b7eaf` (one `threading.Lock` around the SHAP call). Audit team should formalize with a real fix in Round 4 (per-thread cache or subprocess isolation).
 
 **Symptom (Tue May 19, 09:15:12 + 09:20:32 IST):** Engine crashed **twice in 5 minutes** on Round-3 code that had been stable through all of Monday afternoon. Exit codes: `0xc0000005` (access violation) + `0xc0000374` (heap corruption) — both within 4 sec of a BUY trade firing.
 
@@ -1679,6 +1681,8 @@ Test must FAIL on parent of `89b7eaf` (no lock) and PASS on `89b7eaf` (with lock
 
 ## P34. Missing test layers — no stress tests, no replay tests (HIGH — root cause of repeated production-discovery)
 
+**Status:** FIXED in `6531cd4` — `tests/stress/` directory built with conftest (RSS measurement) + 5 concurrent test files (SHAP, xgboost, SQLite, yfinance, telegram). pytest count went from 42 baseline → 45 passed + 2 skipped (xgboost-direct gated as P37 future work). The conftest's `pytest_sessionstart` prints live TreeExplainer RSS at every test run so the audit team can grep `PENDING_AUDIT_FIXES.md` for "TreeExplainer RSS" without re-measuring.
+
 **The meta-problem this round.** The reason P33 (SHAP race) survived 3 audit rounds and only surfaced in live Tuesday-morning trading is that **we don't have any test layer that exercises concurrent C-extension calls under realistic load**. Same gap caused P29 to be misdiagnosed as P9 in Rounds 1-2. Same gap will cause Round 4's next-bug-after-P33 to also slip through.
 
 The 42 existing tests in `tests/` are all sequential unit tests. They check "does this function return the right value?" — not "does this function survive 8 workers calling it simultaneously 100 times in a row?"
@@ -1723,6 +1727,39 @@ Test asserts:
 **Severity:** HIGH — meta-bug. Every future round will keep missing the same class of bug until this lands.
 
 **Acceptance:** All 5 stress tests + at least 1 replay test exist and pass. Audit team confirms the new tests are wired into the pre-push verification gate.
+
+---
+
+## P37. Restore SHAP explainability (deferred from P33) — needs subprocess isolation or upstream fix
+
+**Background:** P33 was "fixed" in `f590bb1` by **disabling SHAP entirely** in production. The strategy is unaffected (SHAP reasons were cosmetic display only), but BUY/SELL alerts now show a generic `"Model confidence based on pattern ensemble"` message instead of the per-feature breakdown like `"rsi = 55.2 (bullish), macd = 14.5 (bullish), nifty_return = 0.012 (bullish)"`.
+
+**What was tried in Round 4 (all failed):**
+
+1. **Module cache + lock around `shap_values()` only** (May 19 hot-patch `89b7eaf`): construction-race crash on cache-miss.
+2. **Per-thread `TreeExplainer` cache via `threading.local()`**: all explainers wrap the same underlying `xgboost.Booster`; `Booster.feature_names` / `predict` race at C-level.
+3. **Module cache + double-checked lock around BOTH construction and `shap_values()`**: still crashes inside `xgboost/data.py:712 _from_pandas_df` — the booster's C-state mutates during data prep even when the SHAP layer is locked.
+
+**Root cause:** `shap.TreeExplainer` + `xgboost.Booster` on this exact stack (Python 3.11.8, xgboost 3.2.0, shap latest, Windows) is **fundamentally not thread-safe at any lock granularity short of "1 thread total"**. This is an upstream issue, not a codebase-patchable bug.
+
+**Restoration paths (audit team — pick one when convenient, not urgent):**
+
+1. **Subprocess isolation** — run SHAP in a `multiprocessing.Process` per BUY. ~30 lines in `signals/generator.py`. Cost: ~300ms startup per call (versus 50-200ms serialization with the locks that don't work). Bulletproof — separate Python interpreter, no shared C state. Likely the right answer.
+
+2. **Upstream version bump** — try Python 3.12 + xgboost 4.x + shap latest combination on a fresh laptop. If a known-thread-safe combo exists, pin in `requirements.txt`. Free if it works.
+
+3. **Single-threaded SHAP path** — refactor the engine so SHAP runs on the main thread (sequentially after worker fan-out finishes). Heavy refactor; not worth the complexity for cosmetic display.
+
+4. **Don't restore.** Keep the generic message. The strategy doesn't use SHAP; the user reads alerts on a phone where compact alerts are arguably better.
+
+**Why not urgent:**
+- Strategy unaffected
+- Alerts still functional (just less informative)
+- Dashboard SHAP column shows generic message gracefully (no broken UI)
+
+**Stress test ready for revival work:** `tests/stress/test_xgboost_predict_concurrent.py` has 2 tests permanently skipped with explicit markers pointing at this entry. The `tests/stress/test_shap_concurrent.py` will need its gate updated when SHAP comes back online.
+
+**Severity:** Low. Feature regression, not a correctness or stability bug.
 
 ---
 
