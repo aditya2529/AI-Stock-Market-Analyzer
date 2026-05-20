@@ -32,11 +32,13 @@ from signals.generator import _shap_reasons
 
 _LOCK_BASED = hasattr(_gen, "_SHAP_LOCK")
 _SKIP_REASON = (
-    "signals/generator.py still has _SHAP_LOCK; under that hot-patch the "
-    "lock wraps shap_values() but not _get_explainer(), so concurrent "
-    "TreeExplainer construction crashes the interpreter. Auto-re-enables "
-    "when the P33 threading.local() per-thread cache lands and _SHAP_LOCK "
-    "is removed."
+    "signals/generator.py still has _SHAP_LOCK (May 19 hot-patch); under "
+    "that variant the lock wraps shap_values() but not _get_explainer(), "
+    "so concurrent TreeExplainer construction crashes the interpreter. "
+    "Auto-re-enables when the P33 final fix lands: cache + lock around "
+    "BOTH construction and shap_values (renamed to _BOOSTER_LOCK to "
+    "reflect new semantics — the lock protects the underlying xgboost "
+    "Booster, not just SHAP)."
 )
 
 
