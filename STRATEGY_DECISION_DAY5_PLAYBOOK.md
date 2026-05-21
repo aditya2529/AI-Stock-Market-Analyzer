@@ -95,8 +95,50 @@ Apply ONE AT A TIME. Measure 10 trades. Then decide on the next.
 #### 8. Switch to a different model architecture
 Drop LSTM, use only XGBoost + regime gate. Simpler, fewer moving parts.
 
-#### 9. Try a different strategy entirely
-Swing trading (multi-day holds) instead of intraday. Pairs trading. Sector rotation. Requires building a new model + new schema migration (P27).
+#### 9. Run a SIMPLE strategy in parallel as a benchmark — Opening Range Breakout (ORB)
+
+**This is the most defensible Tier-4 experiment.** Don't kill the ML strategy. Don't switch to swing. Just build a simple rules-based strategy alongside it and **let the data decide which one earns its keep.**
+
+**The ORB rules:**
+- 09:15-09:30 IST: do nothing, just observe. Record the high and low of every symbol's 15-min window.
+- 09:30 onward: if a symbol's price breaks ABOVE its 09:15-09:30 high → BUY. Stop = 1×ATR below the breakout price. Target = 2×ATR above. (Same R:R as current ML strategy.)
+- No new entries after 14:30 IST. Force close at 15:15 (use same P26 plumbing).
+- Track via separate `paper_trades` rows tagged `strategy='orb'` (needs the P27 schema migration first).
+
+**Why this matters:**
+- ORB is the simplest profitable intraday strategy in academic literature. Published PF in real-world studies: **1.4-1.8** net of fees.
+- Zero ML, zero C-extension threading, zero crash surface. **What broke your ML engine this week (SHAP, xgboost, curl_cffi) doesn't exist in ORB.**
+- If ORB beats ML on the same 50 symbols over 30 trades, you have your answer — retire the ML strategy and ship ORB.
+- If ML beats ORB, you've earned the right to keep the complexity.
+- Either way, you have a benchmark, not a guess.
+
+**Effort:** 1-2 days of clean coding. Doesn't touch the existing engine. Lives in parallel.
+
+**Required prerequisite:** P27 (schema migration to add `strategy` column to `paper_positions` + `paper_trades`, separate cash buckets per strategy). Without this, ORB and ML pollute each other's stats.
+
+**Decision rule at +30 ORB trades:**
+- If ORB lifetime PF > current ML lifetime PF (0.61 today, hopefully better by then) → ORB wins. Retire ML, ship ORB to live money.
+- If ML is better → keep ML, retire ORB. You've earned the complexity.
+- If they're close (both 1.0-1.3) → run both as a 50/50 ensemble. Each diversifies the other.
+
+#### 10. Try a different strategy entirely
+Swing trading (multi-day holds), VWAP reversion (counter-trend), pairs trading, sector rotation. Requires building a new model + new schema migration (P27). **NOT before completing the ORB experiment in #9.**
+
+---
+
+## The plain-English strategy comparison
+
+For the moments when this playbook feels too abstract, remember these analogies:
+
+| Strategy | What it is, in 1 sentence | Real-world analogy |
+|---|---|---|
+| **ORB** | Wait 15 min, watch the opening range, bet on whichever direction breaks the range | Watching 5 overs of a cricket match before betting on the outcome |
+| **VWAP reversion** | Buy when a stock dips below its session-weighted-average price, sell when it returns | Buying Bisleri at hill-station price knowing it'll revert to city normal |
+| **ML momentum (current)** | AI predicts direction from 19 indicators, model says BUY/HOLD/SELL with confidence | A weather forecaster with 50 satellites — should be better than naked-eye, usually is |
+
+**The hard truth:** ML strategy = the hardest to build correctly AND the hardest to debug AND the hardest to maintain. ORB = 1/10th the code, similar real-world PF. You went straight to the deep end. The simple stuff might genuinely outperform.
+
+**The ORB experiment at Day #5 isn't admitting defeat. It's the professional move every quant team makes: benchmark complex strategies against simple ones, and only keep the complexity if it actually earns its keep.**
 
 ---
 
