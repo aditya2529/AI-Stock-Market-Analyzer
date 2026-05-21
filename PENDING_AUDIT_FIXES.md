@@ -1765,6 +1765,8 @@ Test asserts:
 
 ## P38. Engine lingers 2+ hours past expected exit (curl_cffi non-daemon threads block Python shutdown)
 
+**Status:** FIXED in `d05a3b1` — added `sys.exit(0)` at end of `cmd_intraday()` in `main.py`. Forces clean shutdown after `run_intraday_session()` returns, bypassing Python's wait-for-non-daemon-threads behavior. Tests still 45/2.
+
 **Symptom (Wed May 20):** Engine PID 13324 booted via watchdog at 10:55:05 IST. Force-close branch fired correctly at 15:15 IST (log shows `"Day complete. Waiting for market close…"`). After the designed `time.sleep(900)` + `break`, the engine should have exited around 15:30 IST. **Instead it stayed alive until ~17:51 IST** — about 2h 21m past expected exit. No crashes, no work, no log entries during that window. Process eventually exited on its own around 17:54.
 
 **Watchdog log confirms:** `15:15:02 OK - engine alive (PID 13324)`, `15:20:01 OK - engine alive (PID 13324)`, `15:25:01 OK - engine alive (PID 13324)` — engine alive long after force-close completed.
@@ -1863,6 +1865,16 @@ Plus a 15-min off-market run with multiple symbols feeding through `_process_sym
 ---
 
 ## P40. NSE cash bucket has ~₹79K phantom credit (MEDIUM — DEFER, do not fix mid-session)
+
+**Status:** FIXED post-market on Thu May 21, ~17:53 IST. DB-only correction (no code change), so no commit SHA — the change lives in `market_data.db` which is not git-tracked. Pre-fix backup saved as `market_data_pre_p40_20260521_175335.db`.
+
+Applied:
+- `UPDATE paper_config SET value='494575.00' WHERE key='nse_cash'` (= ₹5,00,000 nse_initial + (-₹5,425 lifetime P&L)). Reconciliation gap now ₹0.00 to the rupee.
+- `UPDATE paper_config SET value='500000' WHERE key='peak_value'` — reset peak to baseline. Will retrack accurately from here.
+
+Root cause never definitively traced, but most likely candidate: the May 19 P36 manual reconciliation was done while open positions existed in `paper_positions`. The formula used (`nse_cash = 500000 + lifetime_pnl`) didn't account for the cash debited by those open positions, effectively crediting back their entry cost twice over subsequent days. Net phantom credit: ~₹79K (consistent with the 3-4 force-closed-during-chaos positions from that week).
+
+Lesson for future reconciliations: when reconciling `nse_cash`, the formula must be `nse_initial + sum(closed_trades.net_pnl) - sum(open_positions.entry_cost_with_fees)`. Document this in the playbook so it doesn't recur.
 
 **Symptom (Thu May 21, 09:55 IST):** Dashboard shows `total_value` higher than the trade ledger justifies. Math:
 
