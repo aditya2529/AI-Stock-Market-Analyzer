@@ -1862,6 +1862,63 @@ Plus a 15-min off-market run with multiple symbols feeding through `_process_sym
 
 ---
 
+## P40. NSE cash bucket has ~₹79K phantom credit (MEDIUM — DEFER, do not fix mid-session)
+
+**Symptom (Thu May 21, 09:55 IST):** Dashboard shows `total_value` higher than the trade ledger justifies. Math:
+
+```
+Dashboard total_value          = ₹5,73,902  (cash ₹3,92,596 + open_eq ₹1,81,305)
+Initial + lifetime realized    = ₹4,94,878  (₹5,00,000 + lifetime P&L -₹5,122)
+                                 _________
+                  PHANTOM CREDIT  ~₹79,024
+```
+
+**API metrics affected (all from same root cause):**
+- `cash` overstated by ~₹79K
+- `total_value` overstated by ~₹79K
+- `peak_value` was tracked off the inflated total → also overstated
+- `drawdown_pct` understated (denominator inflated)
+
+**API metrics NOT affected (read from `nse_initial_cash` or `paper_trades` directly):**
+- `n_trades` (40, correct)
+- `win_rate` (42.5%, correct)
+- `total_pnl` (-₹5,122, correct — read from trade ledger, not cash bucket)
+- P28 daily safety gates (use `nse_initial_cash`, correct)
+- Position sizing (uses `get_market_cash("nse")` — uses the inflated cash, but only matters at slot-cap threshold which 2 open positions are nowhere near)
+
+**Suspected cause (needs investigation):**
+
+The phantom appeared between yesterday evening's P36 reconciliation (where I manually set `nse_cash = 500000 + lifetime_pnl`) and now. Possible sources:
+1. The P36 manual UPDATE was done while open positions existed in `paper_positions`, and the math didn't account for the open positions' debited cash → reconciled to the wrong baseline
+2. One of the manual force-closes (Mon AMBUJACEM cleanup, or today's morning closes) credited cash twice
+3. A `set_market_cash` call somewhere wrote a stale value during the engine restart cycles
+4. Today's morning had 3 force-closes — if any of them double-credited, ~₹79K is consistent with ~3 trades' worth of double-credit on ₹25K notional positions
+
+**Why DEFER, not fix mid-session:**
+
+- Engine is using `get_market_cash("nse")` for position sizing decisions RIGHT NOW. If we manually reduce `nse_cash` by ₹79K mid-day, the engine thinks it has less headroom than it does → may reject the next BUY signal or skip a valid setup.
+- P28 daily safety gates compute against `nse_initial_cash` (₹500K, correct), so the daily-loss circuit STILL fires correctly regardless of the phantom.
+- The phantom is **observability noise**, not a trading-correctness bug. Dashboard reads wrong; engine trades right.
+- Same lesson as Tue morning: **don't modify live state during market hours**.
+
+**Proposed fix (POST 15:30 IST, NOT during market hours):**
+
+1. `cp market_data.db market_data_pre_p40_$(date +%Y%m%d).db`
+2. Re-compute expected cash from ground truth:
+   ```python
+   expected_cash = 500000 + sum(paper_trades.net_pnl) - sum(open_position.entry_price × shares × (1+fees))
+   ```
+3. `UPDATE paper_config SET value=<expected_cash> WHERE key='nse_cash'`
+4. `UPDATE paper_config SET value='500000' WHERE key='peak_value'` (reset to baseline, will retrack from there)
+5. Verify reconciliation: API total_value should equal expected_cash + open_eq.
+6. Trace ROOT cause via `git log paper_trading/portfolio.py` + manual replay of all UPDATE calls in conversation history. Identify which UPDATE introduced the ₹79K and document for future.
+
+**Status:** DEFERRED to post-market this evening (same posture as P39). Do NOT fix during 09:15-15:30 IST window.
+
+**Severity:** Medium. Cosmetic dashboard issue. No trading impact today.
+
+---
+
 ## Notes for the audit team
 
 - Production today is running on the user's Windows laptop (8 GB RAM,
