@@ -282,6 +282,14 @@ def cmd_intraday(args):
 
     print(f"Selected: {', '.join(symbols[:10])}{'…' if len(symbols)>10 else ''}\n")
     run_intraday_session(symbols, ensemble, portfolio_value=args.portfolio)
+    # P38: yfinance's curl_cffi spawns non-daemon connection-pool worker threads.
+    # After run_intraday_session() returns, Python's main thread waits for them to
+    # terminate. Their default socket timeouts can stretch hours, leaving the
+    # process "alive" long past intended exit (observed May 20: engine lingered
+    # 2h+ past 15:30 force-close completion). Explicit sys.exit(0) forces clean
+    # shutdown via SystemExit, bypassing the thread-wait.
+    import sys
+    sys.exit(0)
 
 
 def cmd_review(args):
