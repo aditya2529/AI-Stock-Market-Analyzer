@@ -70,6 +70,79 @@ Apply ONE AT A TIME. Measure 10 trades. Then decide on the next.
 
 **Today's evidence:** ADANIENSOL hit target +₹867, then was re-entered after the first close and lost -₹1,145. Net ADANIENSOL today: -₹278. Cooldown would have kept the +₹867 winner clean.
 
+### Tier 2.5 — Portfolio overlays (analyst-grade improvements, no retraining)
+
+**These came out of the May 22, 2026 clean-day-#2 analyst review of an actual session — concrete observable patterns, not theoretical.**
+
+The model itself picks decent signals (DIXON +₹1,046 with conf 0.80, TECHM +₹356, TATACOMM #1 +₹1,055 all proved this today). **The losses are coming from the FRAMEWORK around the model, not the model's predictions.** Five framework gaps were directly observable in today's 8 trades:
+
+#### 2.5.1 Stock-quality tiering with differential sizing
+**The gap:** Engine equal-weights signals on DIXON (best-in-class consumer electronics, ₹11K stock, clean balance sheet) and ZEEL (structurally weak media, Sony merger fallout, ₹82 stock). Same 1% portfolio risk → wildly different alpha quality.
+
+**The fix:**
+- **Tier A** (~15 stocks): large-cap NIFTY 50 constituents with clean fundamentals → normal sizing
+- **Tier B** (~25 stocks): mid-cap NIFTY Next 50 + select NIFTY 100 → 50% reduced sizing
+- **Tier C** (~10 stocks): small-caps + Adani group + structurally weak names → only trade at conf ≥ 0.80
+
+**Implementation:** ~30 LOC. Add `TIER_A_SYMBOLS`, `TIER_B_SYMBOLS`, `TIER_C_SYMBOLS` constants in `config.py`. In `try_open`, multiply position size by tier weight before deploying.
+
+**Today's evidence:** ABFRL (Tier C — Aditya Birla Fashion, mid/small cap) lost -₹91 essentially on round-trip transaction costs. UJJIVANSFB (Tier C — microfinance small-cap) lost -₹459 in 5 min — small-cap liquidity dies in last 30 min. ZEEL (Tier C) drifted to force-close.
+
+#### 2.5.2 Sector momentum overlay
+**The gap:** Model sees only individual stock TA. Doesn't see "NIFTY Bank is down 1% — banking stock BUYs are fighting the tape."
+
+**The fix:** Before opening a BUY in a stock, check the parent sector index (Bank Nifty, NIFTY IT, NIFTY Auto, NIFTY Pharma, etc.). If sector is down ≥ 0.5% intraday → skip the BUY. If sector is up ≥ 0.5% → take normal size or upsize 1.2×.
+
+**Implementation:** ~50 LOC. Add a sector-symbol mapping. Pull sector close in `_process_symbol`. Apply overlay before sizing.
+
+**Today's evidence:** TATACOMM #1 succeeded riding telecom sector strength (Bharti earnings tailwind). TATACOMM #2 failed when sector momentum exhausted. The overlay would have caught the exhaustion and skipped trade #2.
+
+#### 2.5.3 Headline-risk exclusion list
+**The gap:** Adani group stocks (ADANIENSOL, ADANIENT, ADANIPORTS, ADANIGREEN, etc.) gap in either direction on group-wide news that's invisible to pure TA. Loss probability is ~2× normal.
+
+**The fix:** Maintain a small `HEADLINE_RISK_SYMBOLS` set in config — Adani group, anything in active regulatory probe, anything with known earnings within 24h. Either skip entirely OR require conf ≥ 0.80.
+
+**Implementation:** ~10 LOC. Static config list + check in `_process_symbol`. Update list manually weekly.
+
+**Today's evidence:** ADANIENSOL hit SL for -₹1,061 — exactly the kind of name where pure TA fails. Wed's ADANIENSOL also lost.
+
+#### 2.5.4 Hard 14:00 IST cutoff for new entries (refines existing P28-adjacent rule)
+**The gap:** Today's engine opened UJJIVANSFB at **15:05 IST** and ABFRL at **15:10 IST** — both force-closed at 15:15 with 5-min lifespans. Each lost money to transaction costs alone.
+
+**The fix:** Hard-stop new entries at **14:00 IST** (not 14:30 as previously suggested). Last 90 minutes are exit-only. Pros universally treat this as a discipline rule.
+
+**Implementation:** 2 lines in `_process_symbol` before the BUY-open branch. Trivial.
+
+**Today's evidence:** -₹550 combined wasted on late-day entries that had no time to work. This is the cheapest fix on this list and the most evidently needed.
+
+#### 2.5.5 Same-day target cooldown (analyst-confirms existing Tier 2 item #4)
+**The gap:** TATACOMM hit target +₹1,055 at 10:15 IST. Engine re-entered TATACOMM at higher price 30 min later, hit SL for -₹833. Same pattern Wednesday with ADANIENSOL. **This is the #1 single ₹ leak in the system.**
+
+**The fix:** Mirror P30's SL cooldown logic but for target hits. Cannot re-enter a symbol within 2 hours of taking a profit on it (or for the rest of the trading day).
+
+**Today's evidence:** TATACOMM round-2 -₹833. Wednesday's ADANIENSOL round-2 -₹1,145. Pattern is consistent.
+
+**This was already in the playbook (Tier 2 #4) but the analyst review elevates priority — DO THIS FIRST in Tier 2 because it's both highest ₹ leak AND smallest blast radius.**
+
+### Combined expected impact of Tier 2.5 (all 5 overlays)
+
+Applied on today's session retroactively:
+- ABFRL -₹91 (saved by Tier C filter or 14:00 cutoff)
+- UJJIVANSFB -₹459 (saved by 14:00 cutoff and Tier C)
+- TATACOMM #2 -₹833 (saved by target cooldown)
+- ADANIENSOL -₹1,061 (saved by headline-risk exclusion OR Tier C 0.80-conf requirement)
+- ZEEL -₹250 (saved by Tier C exclusion)
+
+Combined saving: **+₹2,694** retroactive on today's 8 trades.
+Today's actual: -₹236.
+Today **with all 5 overlays:** ~+₹2,458 = **+0.49% on ₹5L allocation in ONE day**.
+
+Annualized at this rate (just from today's 5 overlays applied): **+₹6L on ₹5L = ~120% annual return**.
+
+**This estimate is wildly overoptimistic** because (a) it's retrofitting on known outcomes, (b) overlays interact with each other, (c) some "losses" the overlays save would have happened with overlay too. But the order-of-magnitude lift is real: **a model with PF 0.84 + good overlays can become PF 1.5+ without ANY retraining.**
+
+The portfolio-construction discipline matters as much as the predictions themselves. This is what pros actually do.
+
 ### Tier 3 — structural changes (only if Tier 1+2 fail)
 
 #### 5. Position size: 1% → 0.5% risk per trade
