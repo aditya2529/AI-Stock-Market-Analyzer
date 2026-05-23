@@ -1765,7 +1765,7 @@ Test asserts:
 
 ## P38. Engine lingers 2+ hours past expected exit (curl_cffi non-daemon threads block Python shutdown)
 
-**Status:** FIXED in `d05a3b1` — added `sys.exit(0)` at end of `cmd_intraday()` in `main.py`. Forces clean shutdown after `run_intraday_session()` returns, bypassing Python's wait-for-non-daemon-threads behavior. Tests still 45/2.
+**Status:** FIXED in `d05a3b1` — added `sys.exit(0)` at end of `cmd_intraday()` in `main.py`. Forces clean shutdown after `run_intraday_session()` returns, bypassing Python's wait-for-non-daemon-threads behavior. Tests still 45/2. **Hardened in `3a4d79e`: try/finally wraps `run_intraday_session` so `sys.exit(0)` fires on error paths too — the happy-path-only version would let curl_cffi worker threads block shutdown for hours precisely when an exception had already broken something.**
 
 **Symptom (Wed May 20):** Engine PID 13324 booted via watchdog at 10:55:05 IST. Force-close branch fired correctly at 15:15 IST (log shows `"Day complete. Waiting for market close…"`). After the designed `time.sleep(900)` + `break`, the engine should have exited around 15:30 IST. **Instead it stayed alive until ~17:51 IST** — about 2h 21m past expected exit. No crashes, no work, no log entries during that window. Process eventually exited on its own around 17:54.
 
@@ -1928,6 +1928,29 @@ The phantom appeared between yesterday evening's P36 reconciliation (where I man
 **Status:** DEFERRED to post-market this evening (same posture as P39). Do NOT fix during 09:15-15:30 IST window.
 
 **Severity:** Medium. Cosmetic dashboard issue. No trading impact today.
+
+---
+
+## P41. NaN/Inf JSON serialization risk — generalized to all `api/routes/portfolio.py` endpoints
+
+**Status:** FIXED in `70417dc` — extracted `_clean_for_json(DataFrame)` helper at module top + applied to all 4 endpoints (`/portfolio`, `/trades`, `/positions`, `/equity`). Tests still 45/2.
+
+**Background:** Wed May 20 ~11:00 IST, `/api/portfolio/trades` returned HTTP 500 `Out of range float values are not JSON compliant` because pre-P35 trades have NaN in `confidence`. Commit `e352815` patched only `/trades` by inlining `replace([np.nan, np.inf, -np.inf], None)`. Three sibling endpoints (`/portfolio`, `/positions`, `/equity`) had the same risk class and were currently working only because today's data did not happen to contain NaN/Inf — data luck, not safety.
+
+`/equity` was the highest-risk laggard: `drawdown_pct` can produce `Inf` if `peak_value == 0`, which is a defensible early-state.
+
+**The fix:** one helper, four call sites:
+
+```python
+def _clean_for_json(obj):
+    if isinstance(obj, pd.DataFrame):
+        return obj.replace([np.nan, np.inf, -np.inf], None).to_dict(orient="records")
+    return obj
+```
+
+Same behavior on clean data; HTTP 200 with `None` substitution on data containing NaN/Inf. Non-DataFrame inputs pass through unchanged so future callers can pass dicts/lists without special-casing.
+
+**Severity:** Low — preventative. The crash was already happening on `/trades` and would have hit each sibling endpoint the next time its underlying DataFrame contained NaN/Inf.
 
 ---
 
