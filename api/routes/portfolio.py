@@ -1,6 +1,22 @@
 """Paper portfolio endpoints."""
 from fastapi import APIRouter, HTTPException
+import numpy as np
 import pandas as pd
+
+
+def _clean_for_json(obj):
+    """Convert NaN/Inf to None in any DataFrame before JSON serialization.
+
+    FastAPI's default encoder rejects NaN/Inf as non-compliant (HTTP 500 with
+    'Out of range float values are not JSON compliant'). Pre-P35 trades have
+    NaN in confidence; future drawdown calculations could produce Inf if
+    peak_value=0. This helper protects every endpoint from the same class of
+    failure. Non-DataFrame inputs pass through unchanged.
+    """
+    if isinstance(obj, pd.DataFrame):
+        return obj.replace([np.nan, np.inf, -np.inf], None).to_dict(orient="records")
+    return obj
+
 
 router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
 
@@ -49,7 +65,7 @@ def get_portfolio():
         "pnl_pct":        pnl / init if init else 0.0,
         "win_rate":       win_rate,
         "n_trades":       n_trades,
-        "open_positions": nse_positions.to_dict(orient="records"),
+        "open_positions": _clean_for_json(nse_positions),
     }
 
     return {
@@ -63,7 +79,7 @@ def get_portfolio():
         "total_pnl":      pnl,
         "win_rate":       win_rate,
         "n_trades":       n_trades,
-        "open_positions": nse_positions.to_dict(orient="records"),
+        "open_positions": _clean_for_json(nse_positions),
         "nse":            nse_block,
         # NYSE block intentionally removed (P36)
     }
@@ -71,19 +87,11 @@ def get_portfolio():
 
 @router.get("/trades")
 def get_trades(limit: int = 50):
-    """Last N closed trades.
-
-    NaN / Inf in any float column (most often `confidence` for pre-P35 trades)
-    is converted to None before serialization — FastAPI's default JSON encoder
-    rejects NaN as non-compliant.
-    """
-    import numpy as np
+    """Last N closed trades."""
     from paper_trading.portfolio import init_paper_tables, get_trade_history
     init_paper_tables()
     trades = get_trade_history()
-    return (trades.head(limit)
-                  .replace([np.nan, np.inf, -np.inf], None)
-                  .to_dict(orient="records"))
+    return _clean_for_json(trades.head(limit))
 
 
 @router.get("/equity")
@@ -94,7 +102,7 @@ def get_equity_curve():
     log = get_portfolio_log()
     if log.empty:
         return []
-    return log[["timestamp", "total_value", "drawdown_pct"]].to_dict(orient="records")
+    return _clean_for_json(log[["timestamp", "total_value", "drawdown_pct"]])
 
 
 @router.get("/positions")
@@ -102,4 +110,4 @@ def get_positions():
     """All currently open positions."""
     from paper_trading.portfolio import init_paper_tables, get_open_positions
     init_paper_tables()
-    return get_open_positions().to_dict(orient="records")
+    return _clean_for_json(get_open_positions())
