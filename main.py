@@ -413,6 +413,26 @@ def cmd_signal(args):
         print(json.dumps(payload, indent=2))
 
 
+def cmd_live(args):
+    """P42 — live trading demo path. Manual-trigger, kill-switch-gated.
+
+    Dispatches to live_trading.cli.{demo, close, status}. The live_trading
+    package is lazy-imported so its load surface (and the .env re-reads
+    via dotenv_values) never fire during normal paper-engine operation.
+    """
+    from live_trading import cli as live_cli
+    dispatch = {
+        "demo":   live_cli.demo,
+        "close":  live_cli.close,
+        "status": live_cli.status,
+    }
+    handler = dispatch.get(args.live_action)
+    if handler is None:
+        print(f"unknown live action: {args.live_action}", file=sys.stderr)
+        sys.exit(2)
+    handler(args)
+
+
 # ── Argument parser ─────────────────────────────────────────────────────────────
 
 def build_parser() -> argparse.ArgumentParser:
@@ -489,6 +509,27 @@ def build_parser() -> argparse.ArgumentParser:
     p_sig.add_argument("--portfolio", type=float, default=100_000.0)
     p_sig.add_argument("--json", action="store_true", help="Also print raw JSON")
 
+    # P42 — live trading demo path. Default-OFF kill switch (LIVE_TRADING
+    # in .env). Three actions: demo (place), close (square-off), status
+    # (read-only). See LIVE_TRADING_RUNBOOK.md for operator procedures.
+    p_live = sub.add_parser("live", help="Live trading demo path (P42)")
+    live_sub = p_live.add_subparsers(dest="live_action", required=True)
+
+    p_live_demo = live_sub.add_parser("demo", help="Place a live demo order")
+    p_live_demo.add_argument("--symbol", required=True,
+                              help="yfinance ticker (e.g. RELIANCE.NS)")
+    p_live_demo.add_argument("--qty", type=int, required=True,
+                              help="number of shares")
+    p_live_demo.add_argument("--limit-price", type=float, default=None,
+                              help="if provided, order_type switches to LIMIT")
+
+    p_live_close = live_sub.add_parser("close",
+                                         help="Square-off the open position via opposite MARKET")
+    p_live_close.add_argument("--symbol", required=True)
+
+    p_live_status = live_sub.add_parser("status",
+                                          help="Read-only snapshot: kill switch + open + last 5 events")
+
     return parser
 
 
@@ -507,5 +548,6 @@ if __name__ == "__main__":
         "alerts": cmd_alerts,
         "paper": cmd_paper,
         "signal": cmd_signal,
+        "live": cmd_live,
     }
     dispatch[args.command](args)
