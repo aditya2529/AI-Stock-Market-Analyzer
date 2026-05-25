@@ -136,6 +136,20 @@
 
     /* ── Footer / engine status row ── */
     .footer-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:10px 0;border-top:1px solid var(--border);margin-top:8px}
+
+    /* ── Tab navigation ── */
+    .tab-nav{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:14px;padding-bottom:0}
+    .tab-btn{background:transparent;border:none;color:var(--label);font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;padding:10px 18px;cursor:pointer;border-bottom:2px solid transparent;transition:all .2s;display:flex;align-items:center;gap:8px}
+    .tab-btn:hover{color:var(--text)}
+    .tab-btn.active{color:var(--cyan);border-bottom-color:var(--cyan)}
+    .tab-badge{background:var(--red);color:#fff;font-size:9px;font-weight:700;padding:1px 5px;border-radius:8px}
+    .tab-panel{display:none}
+    .tab-panel.active{display:flex;flex-direction:column;gap:14px}
+
+    /* ── Log line scroll ── */
+    .log-list{font-family:var(--mono);font-size:10px;max-height:240px;overflow-y:auto;padding:6px;background:var(--bg3);border-radius:6px;border:1px solid var(--border);line-height:1.4}
+    .log-list div{padding:2px 0;border-bottom:1px dotted var(--border);word-break:break-all}
+    .log-err{color:var(--red)} .log-warn{color:var(--amber)}
     @media (max-width:700px){.footer-row{grid-template-columns:1fr 1fr}}
   </style>
 </head>
@@ -199,6 +213,18 @@
 </div>
 
 <main class="z1">
+
+  <!-- ─── Tab nav ─── -->
+  <div class="tab-nav">
+    <button class="tab-btn active" data-tab="trading" onclick="switchTab('trading')">
+      ▣ Trading
+    </button>
+    <button class="tab-btn" data-tab="health" onclick="switchTab('health')">
+      ◉ System Health <span class="tab-badge" id="health-badge" style="display:none">!</span>
+    </button>
+  </div>
+
+  <div id="tab-trading" class="tab-panel active">
 
   <!-- ─── Market sentiment (kept per user) ─── -->
   <div class="card" id="sentiment-card" title="Combined NIFTY 50 + SENSEX + BANK NIFTY + India VIX read. The market's overall mood today.">
@@ -372,6 +398,74 @@
       <div class="metric-sub" id="refresh-sub">auto every 30s</div>
     </div>
   </div>
+
+  </div><!-- /tab-trading -->
+
+  <!-- ─── SYSTEM HEALTH TAB ─── -->
+  <div id="tab-health" class="tab-panel">
+
+    <div class="grid-4">
+      <div class="metric" title="Whether the Python intraday engine is alive. Detected by log freshness — if today's log was written within the last 6 minutes, engine is running.">
+        <div class="metric-label">Engine</div>
+        <div class="metric-val" id="sh-engine">—</div>
+        <div class="metric-sub" id="sh-engine-sub">—</div>
+      </div>
+      <div class="metric" title="Today's log file at logs/intraday_YYYYMMDD.log — its size grows tick by tick.">
+        <div class="metric-label">Log Size</div>
+        <div class="metric-val" id="sh-logsize">—</div>
+        <div class="metric-sub" id="sh-logage">—</div>
+      </div>
+      <div class="metric" title="Laptop RAM usage. Needs psutil installed for the number to appear — otherwise reads N/A.">
+        <div class="metric-label">RAM Used</div>
+        <div class="metric-val" id="sh-ram">—</div>
+        <div class="metric-sub" id="sh-ram-sub">—</div>
+      </div>
+      <div class="metric" title="Free space on the project drive. If this approaches zero the DB cannot grow and the engine will error.">
+        <div class="metric-label">Disk Free</div>
+        <div class="metric-val" id="sh-disk">—</div>
+        <div class="metric-sub" id="sh-disk-sub">—</div>
+      </div>
+    </div>
+
+    <!-- Pipeline counts today -->
+    <div class="card" title="Engine activity today — count of ticks processed and actions taken (positions opened, closed, stop-loss hits, target hits, end-of-day force closes).">
+      <div class="card-header">
+        <div class="card-title">Pipeline Today</div>
+        <div class="card-sub" id="sh-pipeline-sub">—</div>
+      </div>
+      <div class="grid-6">
+        <div class="metric"><div class="metric-label">Ticks</div><div class="metric-val text-cyan" id="sh-ticks">—</div><div class="metric-sub">5-min cycles</div></div>
+        <div class="metric"><div class="metric-label">Opens</div><div class="metric-val text-green" id="sh-opens">—</div><div class="metric-sub">positions entered</div></div>
+        <div class="metric"><div class="metric-label">Closes</div><div class="metric-val" id="sh-closes">—</div><div class="metric-sub">all exits</div></div>
+        <div class="metric"><div class="metric-label">SL Hits</div><div class="metric-val text-red" id="sh-sl">—</div><div class="metric-sub">stop-loss</div></div>
+        <div class="metric"><div class="metric-label">Targets</div><div class="metric-val text-green" id="sh-tgt">—</div><div class="metric-sub">target reached</div></div>
+        <div class="metric"><div class="metric-label">Force Closes</div><div class="metric-val text-amber" id="sh-fc">—</div><div class="metric-sub">EOD square-off</div></div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card" title="The most recent ERROR lines from today's engine log. Empty is the healthy state.">
+        <div class="card-header">
+          <div class="card-title">Recent Errors</div>
+          <div class="card-sub" id="sh-err-count">—</div>
+        </div>
+        <div class="log-list" id="sh-errs"><div class="text-muted">none</div></div>
+      </div>
+      <div class="card" title="Recent WARNING lines. Some warnings are expected (e.g. yfinance delisted symbols on the universe scan). Look for surprises.">
+        <div class="card-header">
+          <div class="card-title">Recent Warnings</div>
+          <div class="card-sub" id="sh-warn-count">—</div>
+        </div>
+        <div class="log-list" id="sh-warns"><div class="text-muted">none</div></div>
+      </div>
+    </div>
+
+    <div class="metric" style="text-align:center">
+      <div class="metric-label">Log Path</div>
+      <div style="font-family:var(--mono);font-size:11px;color:var(--cyan);word-break:break-all" id="sh-logpath">—</div>
+    </div>
+
+  </div><!-- /tab-health -->
 
 </main>
 
@@ -783,6 +877,65 @@ async function refreshFooter() {
   const now = new Date();
   $("refresh-state").textContent = now.toTimeString().slice(0, 8);
   $("conn-dot").className = "dot dot-green";
+}
+
+// ── Tabs ──
+function switchTab(name) {
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
+  document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id === "tab-" + name));
+  if (name === "health") refreshHealth();
+}
+
+// ── System health tab ──
+async function refreshHealth() {
+  const h = await J("/api/dashboard/system_health");
+  if (!h) return;
+  $("sh-engine").textContent = h.engine_alive ? "RUNNING" : "OFF";
+  $("sh-engine").className = "metric-val " + (h.engine_alive ? "text-green" : "text-muted");
+  $("sh-engine-sub").textContent = h.engine_alive ? "log fresh" : "log stale or off-hours";
+  $("sh-logsize").textContent = h.log_size_kb ? h.log_size_kb.toLocaleString() + " KB" : "—";
+  $("sh-logsize").className = "metric-val text-cyan";
+  const ageSec = h.log_age_seconds;
+  $("sh-logage").textContent = ageSec == null ? "—" : (ageSec < 60 ? Math.round(ageSec) + "s ago" : Math.round(ageSec / 60) + "m ago");
+  if (h.ram_used_pct != null) {
+    $("sh-ram").textContent = h.ram_used_pct.toFixed(0) + "%";
+    $("sh-ram").className = "metric-val " + (h.ram_used_pct > 85 ? "text-red" : h.ram_used_pct > 70 ? "text-amber" : "text-green");
+    $("sh-ram-sub").textContent = "of " + (h.ram_total_mb / 1024).toFixed(1) + " GB";
+  } else {
+    $("sh-ram").textContent = "N/A";
+    $("sh-ram").className = "metric-val text-muted";
+    $("sh-ram-sub").textContent = "psutil not installed";
+  }
+  if (h.disk_free_gb != null) {
+    $("sh-disk").textContent = h.disk_free_gb.toFixed(1) + " GB";
+    $("sh-disk").className = "metric-val text-cyan";
+    $("sh-disk-sub").textContent = h.disk_used_pct.toFixed(0) + "% used";
+  } else {
+    $("sh-disk").textContent = "N/A";
+    $("sh-disk").className = "metric-val text-muted";
+  }
+  $("sh-ticks").textContent = h.today_ticks;
+  $("sh-opens").textContent = h.today_opens;
+  $("sh-closes").textContent = h.today_closes;
+  $("sh-sl").textContent = h.today_sl_hits;
+  $("sh-tgt").textContent = h.today_target_hits;
+  $("sh-fc").textContent = h.today_force_closes;
+  $("sh-pipeline-sub").textContent = h.today_ticks + " ticks · " + h.today_closes + " closes";
+  $("sh-logpath").textContent = h.log_path || "—";
+
+  const errs = h.errors_recent || [], warns = h.warnings_recent || [];
+  $("sh-err-count").textContent = errs.length + " in log tail";
+  $("sh-warn-count").textContent = warns.length + " in log tail";
+  $("sh-errs").innerHTML = errs.length ? errs.map(l => '<div class="log-err">' + escapeHtml(l) + '</div>').join("") : '<div class="text-muted">none — healthy</div>';
+  $("sh-warns").innerHTML = warns.length ? warns.map(l => '<div class="log-warn">' + escapeHtml(l) + '</div>').join("") : '<div class="text-muted">none</div>';
+
+  // Badge on tab if there are errors
+  $("health-badge").style.display = errs.length > 0 ? "inline-block" : "none";
+  $("health-badge").textContent = errs.length;
+}
+
+function escapeHtml(s) {
+  return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 // ── Master refresh ──

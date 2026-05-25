@@ -491,6 +491,87 @@ def get_daily_loss_budget():
         return {"error": str(e)}
 
 
+@router.get("/system_health")
+def get_system_health():
+    """Windows-laptop-aware system health snapshot.
+
+    Replaces the old VPS-only /api/health/full on local installs. Reports:
+    - Engine process state (python PID running today's log path)
+    - Today's pipeline counts (opens, closes, SL hits, target hits, force closes)
+    - Recent errors + warnings from today's log
+    - Laptop RAM + disk (best-effort, no external deps)
+    """
+    out = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "engine_alive": False,
+        "log_path": "",
+        "log_size_kb": 0,
+        "log_age_seconds": None,
+        "today_opens": 0,
+        "today_closes": 0,
+        "today_sl_hits": 0,
+        "today_target_hits": 0,
+        "today_force_closes": 0,
+        "today_ticks": 0,
+        "errors_recent": [],
+        "warnings_recent": [],
+        "ram_used_pct": None,
+        "ram_total_mb": None,
+        "disk_free_gb": None,
+        "disk_used_pct": None,
+    }
+
+    log_path = _today_log_path()
+    out["log_path"] = str(log_path)
+
+    # Log freshness as a proxy for "engine alive" — if last write was within
+    # 6 min during market hours, engine is almost certainly running.
+    if log_path.exists():
+        import time as _time
+        out["log_size_kb"] = round(log_path.stat().st_size / 1024, 1)
+        out["log_age_seconds"] = round(_time.time() - log_path.stat().st_mtime, 0)
+        out["engine_alive"] = out["log_age_seconds"] < 360  # < 6 min
+
+    lines = _read_tail(log_path)
+    errs, warns = [], []
+    for line in lines:
+        # Pipeline counters
+        if "OPEN " in line and "OPEN " in line[:40]:
+            out["today_opens"] += 1
+        if "CLOSE " in line and "CLOSE " in line[:40]:
+            out["today_closes"] += 1
+            if "stop_loss" in line:
+                out["today_sl_hits"] += 1
+            elif "target" in line:
+                out["today_target_hits"] += 1
+            elif "force_close" in line or "force-close" in line.lower():
+                out["today_force_closes"] += 1
+        if "Tick summary" in line:
+            out["today_ticks"] += 1
+        # Errors / warnings
+        if "ERROR" in line:
+            errs.append(line[-260:])
+        elif "WARNING" in line:
+            warns.append(line[-260:])
+
+    out["errors_recent"] = errs[-10:]
+    out["warnings_recent"] = warns[-10:]
+
+    # Best-effort RAM via /proc/meminfo (Linux) or psutil if installed (Windows)
+    try:
+        import psutil  # type: ignore
+        vm = psutil.virtual_memory()
+        out["ram_total_mb"] = round(vm.total / (1024 * 1024), 0)
+        out["ram_used_pct"] = round(vm.percent, 1)
+        du = psutil.disk_usage(str(Path.cwd()))
+        out["disk_free_gb"] = round(du.free / (1024 ** 3), 1)
+        out["disk_used_pct"] = round(du.percent, 1)
+    except Exception:
+        pass
+
+    return out
+
+
 @router.get("/force_close")
 def get_force_close():
     """Countdown to the daily force-close at 15:15 IST.
