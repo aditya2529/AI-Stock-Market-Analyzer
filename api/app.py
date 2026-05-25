@@ -5,7 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pathlib import Path
 
-from api.routes import signals, portfolio, market, health
+from api.routes import signals, portfolio, market, health, dashboard
 
 app = FastAPI(
     title="AI Stock Analyzer",
@@ -24,6 +24,7 @@ app.include_router(signals.router)
 app.include_router(portfolio.router)
 app.include_router(market.router)
 app.include_router(health.router)
+app.include_router(dashboard.router)  # P46 — trader-grade observability
 
 
 @app.get("/api/health")

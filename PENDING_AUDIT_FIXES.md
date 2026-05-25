@@ -2133,11 +2133,12 @@ May 25, 13:20 IST. Reproducible from `paper_trades` table in
 
 ---
 
-## P46. Dashboard ruthless redesign — trader-grade observability (MEDIUM)
+## P46. Dashboard ruthless redesign — trader-grade observability (MEDIUM — DONE)
 
-**Status:** OPEN — scoped May 25 13:30 IST, build starts ~15:30 IST after
-force-close. Owner: ops. All-in-one-shot build. Standing constraint:
-do not break anything currently working.
+**Status:** SHIPPED by ops on May 25 ~16:30 IST. Single-session build,
+all-in-one-shot as planned. Old dashboard preserved at `dashboard/index_v1.html`
+for 30-second rollback. Pytest baseline held at 162/2/0. Engine untouched.
+Audit team: review at next pass.
 
 **Remove (clutter / stale / duplicative):**
 - NYSE Portfolio + Cash + P&L cards (NYSE removed in P36, May 19 — ghost data)

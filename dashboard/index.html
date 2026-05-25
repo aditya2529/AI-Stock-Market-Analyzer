@@ -7,21 +7,22 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
   <style>
+    /* ── Theme tokens ── */
     :root {
       --bg:#060810; --bg2:#0c1020; --bg3:#111828;
       --border:rgba(0,212,255,0.15); --border2:rgba(0,212,255,0.3);
       --cyan:#38bdf8; --green:#34d399; --red:#f87171;
-      --amber:#fbbf24; --purple:#c084fc;
+      --amber:#fbbf24; --purple:#c084fc; --pink:#f472b6;
       --text:#cbd5e1; --label:#94a3b8; --muted:#64748b; --dim:#334155;
       --mono:'JetBrains Mono',monospace;
       --card-bg:rgba(12,16,32,0.85); --card-shadow:none;
       --header-bg:rgba(6,8,16,0.95);
     }
     [data-theme="light"] {
-      --bg:#f0f4f8; --bg2:#ffffff; --bg3:#e2e8f0;
+      --bg:#f5f7fa; --bg2:#ffffff; --bg3:#e8eef4;
       --border:rgba(15,23,42,0.1); --border2:rgba(15,23,42,0.2);
       --cyan:#0284c7; --green:#059669; --red:#dc2626;
-      --amber:#d97706; --purple:#7c3aed;
+      --amber:#d97706; --purple:#7c3aed; --pink:#db2777;
       --text:#1e293b; --label:#475569; --muted:#94a3b8; --dim:#cbd5e1;
       --card-bg:#ffffff; --card-shadow:0 1px 6px rgba(0,0,0,0.07);
       --header-bg:rgba(255,255,255,0.97);
@@ -29,1647 +30,747 @@
     [data-theme="light"] body::before,[data-theme="light"] body::after{display:none}
     *{margin:0;padding:0;box-sizing:border-box}
     body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;font-size:13px;min-height:100vh;overflow-x:hidden;transition:background .3s,color .3s}
-    body::before{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.03) 2px,rgba(0,0,0,.03) 4px);pointer-events:none;z-index:9999}
-    body::after{content:'';position:fixed;top:0;left:0;right:0;bottom:0;background-image:linear-gradient(rgba(0,212,255,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,.03) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0}
+    body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.03) 2px,rgba(0,0,0,.03) 4px);pointer-events:none;z-index:9999}
+    body::after{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(0,212,255,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,.03) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0}
     .z1{position:relative;z-index:1}
 
-    /* Ticker */
-    .ticker-bar{background:rgba(6,8,16,.98);border-bottom:1px solid var(--border);overflow-x:auto;overflow-y:hidden;height:32px;display:flex;align-items:center}
-    .ticker-track{display:flex;gap:0;white-space:nowrap}
-    /* scroll animation disabled — static display */
-    .ticker-item{display:inline-flex;align-items:center;gap:8px;padding:0 24px;border-right:1px solid var(--border);font-family:var(--mono);font-size:11px;white-space:nowrap}
-    .ticker-name{color:var(--label);font-size:10px}
-    .ticker-price{color:#fff;font-weight:600}
-    .ticker-chg-pos{color:var(--green)} .ticker-chg-neg{color:var(--red)}
-
-    /* Header */
+    /* ── Header ── */
     header{background:var(--header-bg);border-bottom:1px solid var(--border2);backdrop-filter:blur(20px);position:sticky;top:0;z-index:100;padding:0 24px}
-    .header-inner{max-width:1600px;margin:0 auto;height:56px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+    .header-inner{max-width:1600px;margin:0 auto;height:52px;display:flex;align-items:center;justify-content:space-between;gap:16px}
     .logo{display:flex;align-items:center;gap:10px}
-    .logo-mark{width:32px;height:32px;background:linear-gradient(135deg,var(--cyan),var(--green));border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#000;letter-spacing:-.5px}
-    .logo-text{font-size:16px;font-weight:700;letter-spacing:2px;color:var(--cyan)}
-    .logo-sub{font-size:10px;color:var(--label);letter-spacing:1px}
-    .header-center{display:flex;align-items:center;gap:12px;font-family:var(--mono);font-size:11px;flex-wrap:wrap}
-    .stat-pill{display:flex;align-items:center;gap:6px;padding:4px 12px;border:1px solid var(--border);border-radius:20px;background:var(--bg2)}
-    .stat-pill .label{color:var(--label)} .stat-pill .val{color:var(--cyan);font-weight:600}
+    .logo-mark{width:30px;height:30px;background:linear-gradient(135deg,var(--cyan),var(--green));border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#000;letter-spacing:-.5px}
+    .logo-text{font-size:15px;font-weight:700;letter-spacing:2px;color:var(--cyan)}
+    .logo-sub{font-size:9px;color:var(--label);letter-spacing:1px}
     .header-right{display:flex;align-items:center;gap:10px}
-    .hdr-input{background:var(--bg2);border:1px solid var(--border2);border-radius:8px;padding:6px 12px;color:var(--text);font-size:12px;width:140px;outline:none;font-family:var(--mono);transition:border-color .2s}
-    .hdr-input:focus{border-color:var(--cyan);box-shadow:0 0 12px rgba(0,212,255,.2)}
-    .btn{padding:6px 14px;border-radius:8px;border:none;font-size:12px;font-weight:600;cursor:pointer;transition:all .2s;letter-spacing:.5px}
-    .btn-primary{background:linear-gradient(135deg,var(--cyan),#0099cc);color:#000}
-    .btn-primary:hover{box-shadow:0 0 20px rgba(0,212,255,.4);transform:translateY(-1px)}
-    .btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border)}
+    .btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border);padding:5px 12px;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;letter-spacing:.5px;transition:all .2s}
     .btn-ghost:hover{color:var(--text);border-color:var(--border2)}
+    .theme-toggle{width:30px;height:30px;border-radius:8px;border:1px solid var(--border2);background:var(--bg2);color:var(--label);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:14px;transition:all .2s}
+    .theme-toggle:hover{border-color:var(--cyan);color:var(--cyan)}
     .dot{width:7px;height:7px;border-radius:50%;display:inline-block}
     .dot-green{background:var(--green);box-shadow:0 0 8px var(--green);animation:blink 2s infinite}
     .dot-red{background:var(--red);box-shadow:0 0 8px var(--red)}
+    .dot-amber{background:var(--amber);box-shadow:0 0 8px var(--amber)}
     @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
-    .theme-toggle{width:32px;height:32px;border-radius:8px;border:1px solid var(--border2);background:var(--bg2);color:var(--label);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px;transition:all .2s;flex-shrink:0}
-    .theme-toggle:hover{border-color:var(--cyan);color:var(--cyan)}
 
-    /* Layout */
-    main{max-width:1600px;margin:0 auto;padding:20px 24px;display:flex;flex-direction:column;gap:20px}
+    /* ── Sticky stat strip — 3 critical numbers, always visible ── */
+    .stat-strip{position:sticky;top:52px;z-index:99;background:linear-gradient(180deg,var(--header-bg) 0%,rgba(6,8,16,0.92) 100%);border-bottom:1px solid var(--border);backdrop-filter:blur(16px);padding:10px 24px}
+    .strip-grid{max-width:1600px;margin:0 auto;display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+    .strip-card{background:var(--bg2);border:1px solid var(--border2);border-radius:10px;padding:10px 14px;display:flex;align-items:center;gap:12px;min-height:54px;position:relative;overflow:hidden}
+    .strip-icon{font-size:18px;flex-shrink:0;width:30px;text-align:center}
+    .strip-text{flex:1;min-width:0}
+    .strip-label{font-size:9px;letter-spacing:1.5px;color:var(--label);text-transform:uppercase;margin-bottom:2px}
+    .strip-val{font-family:var(--mono);font-size:15px;font-weight:700;color:var(--cyan);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .strip-sub{font-size:10px;color:var(--muted);margin-top:1px}
+    .strip-bar{position:absolute;bottom:0;left:0;height:3px;background:var(--cyan);transition:width .4s,background-color .4s}
+    .strip-bar.warn{background:var(--amber)} .strip-bar.crit{background:var(--red)}
 
-    /* Cards */
-    .card{background:var(--card-bg);border:1px solid var(--border);border-radius:12px;padding:16px;backdrop-filter:blur(10px);box-shadow:var(--card-shadow);transition:border-color .3s}
+    /* ── Layout & cards ── */
+    main{max-width:1600px;margin:0 auto;padding:18px 24px;display:flex;flex-direction:column;gap:14px}
+    .card{background:var(--card-bg);border:1px solid var(--border);border-radius:12px;padding:14px 16px;backdrop-filter:blur(10px);box-shadow:var(--card-shadow);transition:border-color .3s;position:relative}
     .card:hover{border-color:var(--border2)}
-    .card-glow{box-shadow:0 0 30px rgba(0,212,255,.05)}
-    .card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+    .card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px}
     .card-title{font-size:10px;font-weight:600;letter-spacing:1.5px;color:var(--label);text-transform:uppercase}
     .card-sub{font-size:10px;color:var(--muted)}
 
-    /* Metric rows */
-    .metrics-row{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
-    .split-metrics{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-    .mini-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-    .metric-card{background:var(--card-bg);border:1px solid var(--border);border-radius:10px;padding:14px 16px;box-shadow:var(--card-shadow);position:relative;overflow:hidden;transition:all .3s}
-    .metric-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--cyan),transparent);opacity:0;transition:opacity .3s}
-    .metric-card:hover::before{opacity:1}
-    .metric-card:hover{border-color:var(--border2);transform:translateY(-2px)}
-    .mini-card{background:var(--card-bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;box-shadow:var(--card-shadow)}
-    .metric-label{font-size:10px;letter-spacing:1px;color:var(--label);text-transform:uppercase;margin-bottom:6px}
-    .metric-val{font-family:var(--mono);font-size:20px;font-weight:700;line-height:1}
-    .mini-val{font-family:var(--mono);font-size:15px;font-weight:700;line-height:1}
-    .metric-sub{font-size:10px;color:var(--muted);margin-top:4px}
+    .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+    .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+    .grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+    .grid-6{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}
+    @media (max-width:1100px){.grid-3,.grid-4,.grid-6{grid-template-columns:1fr 1fr}}
+    @media (max-width:700px){.grid-2,.grid-3,.grid-4,.grid-6,.strip-grid{grid-template-columns:1fr}}
+
+    /* ── Metric cards (compact) ── */
+    .metric{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 12px}
+    .metric-label{font-size:9px;letter-spacing:1px;color:var(--label);text-transform:uppercase;margin-bottom:4px}
+    .metric-val{font-family:var(--mono);font-size:17px;font-weight:700;line-height:1.1}
+    .metric-sub{font-size:9px;color:var(--muted);margin-top:3px}
     .text-cyan{color:var(--cyan)} .text-green{color:var(--green)} .text-red{color:var(--red)}
-    .text-amber{color:var(--amber)} .text-white{color:var(--text)} .text-muted{color:var(--muted)}
-    .glow-green{text-shadow:0 0 16px rgba(52,211,153,.3)}
-    .glow-red{text-shadow:0 0 16px rgba(248,113,113,.3)}
-    .glow-cyan{text-shadow:0 0 16px rgba(56,189,248,.3)}
+    .text-amber{color:var(--amber)} .text-purple{color:var(--purple)} .text-pink{color:var(--pink)}
+    .text-muted{color:var(--muted)} .text-label{color:var(--label)}
 
-    /* Market panel headers */
-    .market-panel{border-radius:12px;border:1px solid var(--border);overflow:hidden}
-    .market-panel-header{padding:10px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border)}
-    .market-panel-nse{background:linear-gradient(90deg,rgba(56,189,248,.08),transparent)}
-    .market-panel-nyse{background:linear-gradient(90deg,rgba(251,191,36,.08),transparent)}
-    .market-tag{font-size:10px;font-weight:700;letter-spacing:2px;padding:3px 10px;border-radius:10px}
-    .tag-nse{background:rgba(56,189,248,.15);color:var(--cyan);border:1px solid rgba(56,189,248,.3)}
-    .tag-nyse{background:rgba(251,191,36,.15);color:var(--amber);border:1px solid rgba(251,191,36,.3)}
-    .market-panel-body{padding:14px 16px}
+    /* ── Tables ── */
+    table{width:100%;border-collapse:collapse;font-size:11px;font-family:var(--mono)}
+    th{text-align:left;padding:6px 8px;color:var(--label);font-weight:600;font-size:10px;letter-spacing:.5px;text-transform:uppercase;border-bottom:1px solid var(--border)}
+    td{padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:middle}
+    tbody tr:hover{background:rgba(0,212,255,0.04)}
+    .table-wrap{max-height:340px;overflow-y:auto}
+    .empty{text-align:center;padding:18px;color:var(--muted);font-style:italic;font-size:11px}
 
-    /* Charts */
-    .charts-row{display:grid;grid-template-columns:2fr 1fr;gap:12px}
-    .market-charts{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    /* ── Pills & badges ── */
+    .pill{display:inline-block;padding:1px 7px;border-radius:9px;font-size:9px;font-weight:600;letter-spacing:.5px;text-transform:uppercase}
+    .pill-green{background:rgba(52,211,153,.15);color:var(--green);border:1px solid rgba(52,211,153,.3)}
+    .pill-red{background:rgba(248,113,113,.15);color:var(--red);border:1px solid rgba(248,113,113,.3)}
+    .pill-amber{background:rgba(251,191,36,.15);color:var(--amber);border:1px solid rgba(251,191,36,.3)}
+    .pill-cyan{background:rgba(56,189,248,.15);color:var(--cyan);border:1px solid rgba(56,189,248,.3)}
+    .pill-muted{background:rgba(100,116,139,.15);color:var(--muted);border:1px solid var(--border)}
 
-    /* Badges */
-    .badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700;letter-spacing:.5px}
-    .badge-buy{background:rgba(0,255,136,.15);color:var(--green);border:1px solid rgba(0,255,136,.3)}
-    .badge-sell{background:rgba(255,51,102,.15);color:var(--red);border:1px solid rgba(255,51,102,.3)}
-    .badge-hold{background:rgba(74,85,104,.2);color:var(--muted);border:1px solid var(--border)}
-    .badge-trending_up{background:rgba(0,255,136,.1);color:var(--green)}
-    .badge-trending_down{background:rgba(255,51,102,.1);color:var(--red)}
-    .badge-sideways{background:rgba(255,170,0,.1);color:var(--amber)}
-    .badge-high_vol{background:rgba(168,85,247,.1);color:var(--purple)}
-    .badge-unknown{background:rgba(74,85,104,.2);color:var(--muted)}
-    .badge-warn{background:rgba(251,191,36,.15);color:var(--amber);border:1px solid rgba(251,191,36,.3)}
+    /* ── Histogram bars ── */
+    .hist{display:flex;align-items:flex-end;gap:4px;height:80px;padding:6px 0;border-bottom:1px solid var(--border)}
+    .hist-bar{flex:1;background:linear-gradient(180deg,var(--cyan),rgba(56,189,248,0.2));border-radius:3px 3px 0 0;min-height:2px;position:relative;transition:height .4s}
+    .hist-bar.above{background:linear-gradient(180deg,var(--green),rgba(52,211,153,0.2))}
+    .hist-labels{display:flex;gap:4px;margin-top:4px;font-family:var(--mono);font-size:8px;color:var(--muted)}
+    .hist-labels span{flex:1;text-align:center}
 
-    /* Signal feed */
-    .signal-item{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-radius:8px;margin-bottom:6px;border:1px solid transparent;transition:all .2s}
-    .signal-buy{background:rgba(0,255,136,.06);border-color:rgba(0,255,136,.2)}
-    .signal-sell{background:rgba(255,51,102,.06);border-color:rgba(255,51,102,.2)}
-    .signal-hold{background:rgba(74,85,104,.1);border-color:var(--border)}
+    /* ── Sector bar ── */
+    .sector-row{display:flex;align-items:center;gap:10px;padding:5px 0}
+    .sector-name{width:90px;font-family:var(--mono);font-size:11px;color:var(--label)}
+    .sector-bar-bg{flex:1;height:14px;background:var(--bg3);border-radius:4px;overflow:hidden;position:relative}
+    .sector-bar-fill{height:100%;border-radius:4px;transition:width .4s}
+    .sector-val{width:90px;text-align:right;font-family:var(--mono);font-size:11px;font-weight:700}
 
-    /* Tables */
-    table{width:100%;border-collapse:collapse}
-    thead th{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--label);text-align:left;padding:0 10px 10px 0;border-bottom:1px solid var(--dim)}
-    tbody tr{border-bottom:1px solid rgba(0,212,255,.05);transition:background .15s}
-    tbody tr:hover{background:rgba(0,212,255,.03)}
-    tbody td{padding:8px 10px 8px 0;font-size:12px}
-    .mono{font-family:var(--mono)}
+    /* ── Section header ── */
+    .section-hdr{font-size:11px;letter-spacing:2px;color:var(--label);text-transform:uppercase;margin:6px 0 4px;font-weight:600;display:flex;align-items:center;gap:8px}
+    .section-hdr::after{content:'';flex:1;height:1px;background:var(--border)}
 
-    /* Watchlist */
-    .watchlist-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
-    .watch-card{background:var(--card-bg);border:1px solid var(--border);border-radius:10px;padding:12px;transition:all .2s}
-    .watch-card:hover{border-color:var(--border2)}
-    .watch-sym{font-family:var(--mono);font-weight:700;font-size:13px;color:var(--text)}
-    .watch-price{font-family:var(--mono);font-size:18px;font-weight:700;margin:6px 0}
-    .watch-row{display:flex;justify-content:space-between;margin-top:4px}
-    .watch-key{font-size:9px;letter-spacing:1px;color:var(--label);text-transform:uppercase}
-    .watch-v{font-family:var(--mono);font-size:11px}
-    .conf-bar{height:3px;background:var(--bg3);border-radius:2px;margin-top:8px}
-    .conf-fill{height:100%;border-radius:2px;transition:width .5s}
+    /* ── Cooldown chip ── */
+    .chip{display:inline-block;padding:3px 10px;border-radius:14px;background:rgba(251,191,36,.12);color:var(--amber);border:1px solid rgba(251,191,36,.3);font-family:var(--mono);font-size:11px;margin:3px 4px 3px 0}
 
-    /* PnL bars */
-    .pnl-bar-wrap{display:flex;align-items:center;gap:8px;margin-bottom:5px}
-    .pnl-sym{font-family:var(--mono);font-size:11px;font-weight:600;width:130px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .pnl-bar-bg{flex:1;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden}
-    .pnl-bar-fill{height:100%;border-radius:3px;transition:width .6s}
-    .pnl-val{font-family:var(--mono);font-size:10px;width:70px;text-align:right}
-
-    /* Pagination */
-    .pg-btn{min-width:30px;height:28px;padding:0 8px;border-radius:6px;border:1px solid var(--border2);background:var(--bg2);color:var(--label);font-family:var(--mono);font-size:11px;cursor:pointer;transition:all .15s;display:inline-flex;align-items:center;justify-content:center}
-    .pg-btn:hover:not(:disabled){border-color:var(--cyan);color:var(--cyan)}
-    .pg-btn.active{background:var(--cyan);color:#000;border-color:var(--cyan);font-weight:700}
-    .pg-btn:disabled{opacity:.3;cursor:default}
-
-    /* Section headers */
-    .section-hdr{font-size:10px;font-weight:600;letter-spacing:2px;color:var(--label);text-transform:uppercase;margin-bottom:10px;display:flex;align-items:center;gap:8px}
-    .section-hdr::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,var(--dim),transparent)}
-
-    ::-webkit-scrollbar{width:4px;height:4px}
-    ::-webkit-scrollbar-track{background:var(--bg2)}
-    ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
-
-    @keyframes flash{0%{opacity:.4}100%{opacity:1}}
-    .flash{animation:flash .4s ease-out}
-
-    @media(max-width:1200px){
-      .metrics-row{grid-template-columns:repeat(3,1fr)}
-      .charts-row{grid-template-columns:1fr}
-      .split-metrics{grid-template-columns:1fr}
-      .market-charts{grid-template-columns:1fr}
-    }
-    @media(max-width:768px){
-      /* Force everything to single or 2-column on tablet */
-      .metrics-row{grid-template-columns:repeat(2,1fr) !important}
-      .header-center{display:none}
-      .mini-metrics{grid-template-columns:repeat(2,1fr)}
-      .charts-row{grid-template-columns:1fr !important}
-      .market-charts{grid-template-columns:1fr !important}
-      /* Tables horizontally scrollable instead of breaking layout */
-      table{display:block;overflow-x:auto;white-space:nowrap;-webkit-overflow-scrolling:touch}
-      table thead,table tbody,table tr{display:table;width:100%;table-layout:auto}
-      /* Card padding tightens */
-      .card{padding:12px !important}
-      /* Tab nav scrolls horizontally if too wide */
-      .tab-nav{overflow-x:auto;-webkit-overflow-scrolling:touch;flex-wrap:nowrap}
-      .tab-btn{padding:10px 14px;font-size:11px;white-space:nowrap;flex-shrink:0}
-      /* Watchlist tighter */
-      .watchlist-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
-      /* Signal lookup card — stack input + button */
-      #signal-lookup-card > div:first-of-type{flex-direction:column;align-items:stretch}
-      #signal-lookup-card input{min-width:0 !important;width:100%}
-      #signal-lookup-card button{width:100%}
-    }
-    @media(max-width:480px){
-      /* Phone: single-column metrics + tight typography */
-      .metrics-row{grid-template-columns:1fr !important}
-      .mini-metrics{grid-template-columns:1fr}
-      body{font-size:12px}
-      .metric-val{font-size:18px !important}
-      .metric-label{font-size:9px !important}
-      .metric-sub{font-size:10px !important}
-      /* Force-override inline 4-col grids that bypass class rules */
-      [style*="grid-template-columns:repeat(4,1fr)"]{grid-template-columns:1fr !important}
-      [style*="grid-template-columns:repeat(3,1fr)"]{grid-template-columns:1fr !important}
-      /* Sentiment card stacks */
-      #sentiment-card{flex-direction:column !important;align-items:flex-start !important}
-      #sentiment-verdict{font-size:20px !important}
-      /* Larger tap targets */
-      .tab-btn{min-height:44px;padding:12px 16px}
-      button,input,select{min-height:40px}
-      /* Hide less-essential columns to reduce horizontal scroll burden */
-      table th:nth-child(3),table td:nth-child(3),
-      table th:nth-child(4),table td:nth-child(4){display:none}
-    }
-
-    /* ─── Tab nav ─── */
-    .tab-nav{display:flex;gap:6px;border-bottom:1px solid var(--border);padding:0 4px}
-    .tab-btn{background:transparent;border:none;color:var(--label);font-size:12px;font-weight:600;letter-spacing:1.5px;padding:12px 20px;cursor:pointer;border-bottom:2px solid transparent;display:flex;align-items:center;gap:8px;transition:all .2s;position:relative}
-    .tab-btn:hover{color:var(--text)}
-    .tab-btn.active{color:var(--cyan);border-bottom-color:var(--cyan);text-shadow:0 0 12px rgba(56,189,248,.4)}
-    .tab-icon{font-size:14px}
-    .tab-badge{position:absolute;top:6px;right:6px;background:var(--red);color:#fff;font-size:9px;font-weight:700;width:14px;height:14px;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 0 8px var(--red);animation:blink 1.5s infinite}
-    .tab-panel{display:flex;flex-direction:column;gap:20px}
-
-    /* ─── Health tab ─── */
-    .kv-grid{display:grid;grid-template-columns:max-content 1fr;gap:8px 18px;font-family:var(--mono);font-size:11px}
-    .kv-grid .k{color:var(--label);text-transform:uppercase;letter-spacing:.5px}
-    .kv-grid .k[title]{cursor:help;border-bottom:1px dotted var(--label);display:inline-block}
-    .kv-grid .v{color:var(--text);text-align:right;word-break:break-all}
-    .metric-card[title]{cursor:help}
-    .card[title]{position:relative}
-    .card[title] .card-title{cursor:help;border-bottom:1px dotted var(--label);padding-bottom:2px}
-    .kv-grid .v.good{color:var(--green)}
-    .kv-grid .v.warn{color:var(--amber)}
-    .kv-grid .v.bad{color:var(--red)}
-    .log-list{max-height:240px;overflow-y:auto;font-family:var(--mono);font-size:10.5px;line-height:1.55}
-    .log-list .log-line{padding:4px 6px;border-bottom:1px solid var(--border);color:var(--text);word-break:break-word}
-    .log-list .log-line.err{color:var(--red)}
-    .log-list .log-line.warn{color:var(--amber)}
-    .h-pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;letter-spacing:1px}
-    .h-pill.good{background:rgba(52,211,153,.15);color:var(--green);border:1px solid rgba(52,211,153,.3)}
-    .h-pill.bad{background:rgba(248,113,113,.15);color:var(--red);border:1px solid rgba(248,113,113,.3)}
-    .h-pill.warn{background:rgba(251,191,36,.15);color:var(--amber);border:1px solid rgba(251,191,36,.3)}
+    /* ── Footer / engine status row ── */
+    .footer-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:10px 0;border-top:1px solid var(--border);margin-top:8px}
+    @media (max-width:700px){.footer-row{grid-template-columns:1fr 1fr}}
   </style>
 </head>
 <body>
 
-<!-- Ticker Bar -->
-<div class="ticker-bar z1">
-  <div class="ticker-track" id="ticker-track">
-    <div class="ticker-item"><span class="ticker-name">Loading…</span></div>
-  </div>
-</div>
-
-<!-- Header -->
+<!-- ─── Header ─── -->
 <header>
   <div class="header-inner z1">
     <div class="logo">
       <div class="logo-mark">NX</div>
       <div>
         <div class="logo-text">NEXUS</div>
-        <div class="logo-sub">AI TRADING SYSTEM · PAPER MODE</div>
-      </div>
-    </div>
-    <div class="header-center">
-      <div class="stat-pill">
-        <span class="dot dot-green" id="conn-dot"></span>
-        <span class="label">STATUS</span>
-        <span class="val" id="conn-text">CONNECTING</span>
-      </div>
-      <div class="stat-pill">
-        <span class="label">NSE</span>
-        <span id="market-status" class="val">—</span>
-      </div>
-      <div class="stat-pill" style="display:none">
-        <span class="label">NYSE</span>
-        <span id="nyse-status" class="val">—</span>
-      </div>
-      <div class="stat-pill">
-        <span class="label">IST</span>
-        <span id="live-clock" style="font-family:var(--mono);font-size:12px;color:var(--cyan);letter-spacing:1px">—</span>
-      </div>
-      <div class="stat-pill">
-        <span class="label">ET</span>
-        <span id="et-clock" style="font-family:var(--mono);font-size:12px;color:var(--amber);letter-spacing:1px">—</span>
-      </div>
-      <div class="stat-pill">
-        <span class="label">NEXT SCAN</span>
-        <span class="val" id="next-scan">—</span>
+        <div class="logo-sub">AI TRADING · PAPER MODE · v2.1</div>
       </div>
     </div>
     <div class="header-right">
-      <input id="sym-input" class="hdr-input" type="text" placeholder="Add symbol…" />
-      <button class="btn btn-primary" onclick="addSymbol()">+ WATCH</button>
-      <button class="btn btn-ghost" onclick="refreshAll()">⟳ REFRESH</button>
+      <span class="dot dot-green" id="conn-dot" title="API connection"></span>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--cyan)" id="ist-clock">—</span>
+      <button class="btn-ghost" onclick="refreshAll()">⟳ REFRESH</button>
       <button class="theme-toggle" onclick="toggleTheme()" id="theme-btn">🌙</button>
     </div>
   </div>
 </header>
 
+<!-- ─── Sticky stat strip — the 3 numbers a trader needs at every glance ─── -->
+<div class="stat-strip z1">
+  <div class="strip-grid">
+    <div class="strip-card" id="strip-clock" title="Time remaining until the 15:15 IST automatic force-close. Engine closes all positions at this time regardless of P&L.">
+      <div class="strip-icon">⏱</div>
+      <div class="strip-text">
+        <div class="strip-label">Force-close countdown</div>
+        <div class="strip-val" id="fc-label">—</div>
+        <div class="strip-sub" id="fc-sub">—</div>
+      </div>
+    </div>
+    <div class="strip-card" id="strip-budget" title="Daily loss budget — the engine hard-halts at 3% of peak portfolio. Shows how much room remains today.">
+      <div class="strip-icon">💰</div>
+      <div class="strip-text">
+        <div class="strip-label">Daily loss budget</div>
+        <div class="strip-val" id="budget-val">—</div>
+        <div class="strip-sub" id="budget-sub">—</div>
+      </div>
+      <div class="strip-bar" id="budget-bar" style="width:0%"></div>
+    </div>
+    <div class="strip-card" id="strip-conf" title="How many universe stocks crossed the 0.60 confidence floor in the most recent tick. Zero means model sees no high-conviction setups.">
+      <div class="strip-icon">📊</div>
+      <div class="strip-text">
+        <div class="strip-label">Signals above 0.60 floor</div>
+        <div class="strip-val" id="conf-above">—</div>
+        <div class="strip-sub" id="conf-sub">—</div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <main class="z1">
 
-  <!-- ── Tab Navigation ── -->
-  <div class="tab-nav">
-    <button class="tab-btn active" data-tab="trading" onclick="switchTab('trading')"
-            title="View your portfolio, open positions, and trade history.">
-      <span class="tab-icon">▣</span> TRADING
-    </button>
-    <button class="tab-btn" data-tab="health" onclick="switchTab('health')"
-            title="View whether the trading engine is healthy, how much memory it is using, and any recent errors. A red dot here means something is wrong.">
-      <span class="tab-icon">◉</span> SYSTEM HEALTH
-      <span class="tab-badge" id="health-badge" style="display:none">!</span>
-    </button>
-  </div>
-
-  <div id="tab-trading" class="tab-panel">
-
-  <!-- ── Market Sentiment ── -->
-  <div class="card card-glow" id="sentiment-card" title="Combined view of NIFTY 50 + SENSEX + BANK NIFTY + India VIX. Tells you the overall market mood today."
-       style="padding:14px 18px;display:flex;align-items:center;gap:24px;flex-wrap:wrap">
-    <div>
-      <div class="card-title" style="margin-bottom:6px">MARKET SENTIMENT</div>
-      <div id="sentiment-verdict" style="font-family:var(--mono);font-size:24px;font-weight:700;letter-spacing:1px">—</div>
+  <!-- ─── Market sentiment (kept per user) ─── -->
+  <div class="card" id="sentiment-card" title="Combined NIFTY 50 + SENSEX + BANK NIFTY + India VIX read. The market's overall mood today.">
+    <div class="card-header">
+      <div class="card-title">Market Sentiment</div>
+      <div class="card-sub" id="sentiment-note">—</div>
     </div>
-    <div style="flex:1;display:flex;gap:16px;flex-wrap:wrap;font-family:var(--mono);font-size:11px">
-      <div><span style="color:var(--label)">AVG CHANGE</span> <span id="sentiment-avg" style="font-weight:700;margin-left:6px">—</span></div>
-      <div><span style="color:var(--label)">VIX</span> <span id="sentiment-vix" style="font-weight:700;margin-left:6px">—</span></div>
-      <div id="sentiment-note" style="color:var(--muted);font-style:italic">—</div>
+    <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap">
+      <div>
+        <div class="metric-label">Verdict</div>
+        <div style="font-family:var(--mono);font-size:22px;font-weight:700" id="sentiment-verdict">—</div>
+      </div>
+      <div style="display:flex;gap:24px;flex-wrap:wrap;font-family:var(--mono);font-size:12px">
+        <div><span style="color:var(--label)">AVG CHG</span> <b style="margin-left:6px" id="sentiment-avg">—</b></div>
+        <div><span style="color:var(--label)">VIX</span> <b style="margin-left:6px" id="sentiment-vix">—</b></div>
+      </div>
     </div>
   </div>
 
-  <!-- ── Signal Lookup (any symbol on demand) ── -->
-  <div class="card card-glow" id="signal-lookup-card"
-       title="Type any NSE symbol (e.g. RELIANCE.NS) and get the model's current BUY/SELL/HOLD signal with stop-loss, target, and confidence."
-       style="padding:14px 18px;margin-top:10px">
-    <div class="card-title" style="margin-bottom:10px">CHECK SIGNAL</div>
-    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
-      <input id="sl-symbol-input" list="sl-symbol-suggestions" placeholder="e.g. RELIANCE.NS"
-             style="flex:1;min-width:220px;padding:8px 12px;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;color:var(--text);font-family:var(--mono);font-size:13px;text-transform:uppercase"
-             onkeydown="if(event.key==='Enter') lookupSignal()" />
-      <datalist id="sl-symbol-suggestions">
-        <option value="RELIANCE.NS"><option value="TCS.NS"><option value="INFY.NS"><option value="HDFCBANK.NS">
-        <option value="ICICIBANK.NS"><option value="SBIN.NS"><option value="AXISBANK.NS"><option value="KOTAKBANK.NS">
-        <option value="HCLTECH.NS"><option value="WIPRO.NS"><option value="LT.NS"><option value="MARUTI.NS">
-        <option value="TATASTEEL.NS"><option value="HINDALCO.NS"><option value="ITC.NS"><option value="HINDUNILVR.NS">
-        <option value="ADANIENT.NS"><option value="ADANIPORTS.NS"><option value="CIPLA.NS"><option value="SUNPHARMA.NS">
-        <option value="BAJAJ-AUTO.NS"><option value="BHARTIARTL.NS"><option value="ONGC.NS"><option value="BPCL.NS">
-        <option value="NESTLEIND.NS"><option value="DRREDDY.NS"><option value="BRITANNIA.NS"><option value="M&M.NS">
-      </datalist>
-      <button onclick="lookupSignal()"
-              style="padding:8px 18px;background:var(--cyan);border:none;border-radius:6px;color:var(--bg);font-family:var(--mono);font-weight:700;font-size:12px;cursor:pointer;letter-spacing:0.5px">GET SIGNAL</button>
+  <!-- ─── Portfolio overview ─── -->
+  <div class="section-hdr">Portfolio</div>
+  <div class="grid-6">
+    <div class="metric">
+      <div class="metric-label">Total Value</div>
+      <div class="metric-val text-cyan" id="m-total">—</div>
+      <div class="metric-sub" id="m-total-sub">—</div>
     </div>
-    <div id="sl-result" style="display:none;font-family:var(--mono);font-size:12px;padding:12px;background:var(--bg3);border-radius:6px;border:1px solid var(--border)"></div>
-    <div id="sl-status" style="font-family:var(--mono);font-size:11px;color:var(--muted);font-style:italic"></div>
-  </div>
-
-  <!-- ── Top Metrics (NSE-only) ── -->
-  <div class="metrics-row" style="grid-template-columns:repeat(4,1fr)">
-    <div class="metric-card" style="border-color:rgba(56,189,248,.25)">
-      <div class="metric-label" style="color:var(--cyan)">◉ NSE Portfolio</div>
-      <div class="metric-val text-cyan glow-cyan" id="m-nse-total">—</div>
-      <div class="metric-sub" id="m-nse-total-sub">—</div>
+    <div class="metric">
+      <div class="metric-label">Cash</div>
+      <div class="metric-val" id="m-cash">—</div>
+      <div class="metric-sub" id="m-cash-sub">—</div>
     </div>
-    <div class="metric-card" style="border-color:rgba(56,189,248,.25)">
-      <div class="metric-label" style="color:var(--cyan)">◉ NSE Cash ₹</div>
-      <div class="metric-val text-white" id="m-nse-cash">—</div>
-      <div class="metric-sub" id="m-nse-cash-pct">—</div>
+    <div class="metric">
+      <div class="metric-label">Lifetime P&amp;L</div>
+      <div class="metric-val" id="m-pnl">—</div>
+      <div class="metric-sub" id="m-pnl-sub">—</div>
     </div>
-    <div class="metric-card" style="display:none">
-      <div class="metric-label" style="color:var(--amber)">◉ NYSE Portfolio</div>
-      <div class="metric-val text-amber" id="m-nyse-total">—</div>
-      <div class="metric-sub" id="m-nyse-total-sub">—</div>
-    </div>
-    <div class="metric-card" style="display:none">
-      <div class="metric-label" style="color:var(--amber)">◉ NYSE Cash $</div>
-      <div class="metric-val text-white" id="m-nyse-cash">—</div>
-      <div class="metric-sub" id="m-nyse-cash-pct">—</div>
-    </div>
-    <div class="metric-card">
+    <div class="metric">
       <div class="metric-label">Win Rate</div>
       <div class="metric-val text-green" id="m-wr">—</div>
       <div class="metric-sub" id="m-wr-sub">—</div>
     </div>
-    <div class="metric-card">
+    <div class="metric">
+      <div class="metric-label">Drawdown</div>
+      <div class="metric-val text-amber" id="m-dd">—</div>
+      <div class="metric-sub" id="m-dd-sub">vs peak</div>
+    </div>
+    <div class="metric">
       <div class="metric-label">Open Positions</div>
       <div class="metric-val text-cyan" id="m-open">—</div>
-      <div class="metric-sub" id="m-open-sub">NSE</div>
+      <div class="metric-sub" id="m-open-sub">cap 5</div>
     </div>
   </div>
 
-  <!-- ── NSE Panel — duplicates of top row hidden, P&L + Trades kept ── -->
-  <div class="split-metrics" style="grid-template-columns:1fr">
-
-    <!-- NSE Panel -->
-    <div class="market-panel">
-      <div class="market-panel-header market-panel-nse">
-        <span class="market-tag tag-nse">◉ NSE</span>
-        <span style="font-size:11px;color:var(--label)">India — Nifty 500</span>
-        <span id="nse-mkt-badge" style="margin-left:auto;font-size:10px;color:var(--muted)"></span>
-      </div>
-      <div class="market-panel-body">
-        <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px">
-          <div class="mini-card" style="display:none">
-            <div class="metric-label">Portfolio ₹</div>
-            <div class="mini-val text-cyan" id="nse-portfolio">—</div>
-            <div class="metric-sub" id="nse-portfolio-sub">total value</div>
-          </div>
-          <div class="mini-card" style="display:none">
-            <div class="metric-label">Cash ₹</div>
-            <div class="mini-val text-white" id="nse-cash">—</div>
-            <div class="metric-sub" id="nse-cash-pct">—</div>
-          </div>
-          <div class="mini-card">
-            <div class="metric-label">P&amp;L ₹</div>
-            <div class="mini-val" id="nse-pnl">—</div>
-            <div class="metric-sub" id="nse-pnl-pct">—</div>
-          </div>
-          <div class="mini-card" style="display:none">
-            <div class="metric-label">Win Rate</div>
-            <div class="mini-val text-green" id="nse-wr">—</div>
-            <div class="metric-sub" id="nse-wr-sub">—</div>
-          </div>
-          <div class="mini-card" style="display:none">
-            <div class="metric-label">Open</div>
-            <div class="mini-val text-cyan" id="nse-open">—</div>
-            <div class="metric-sub">positions</div>
-          </div>
-          <div class="mini-card">
-            <div class="metric-label">Trades</div>
-            <div class="mini-val text-white" id="nse-trades">—</div>
-            <div class="metric-sub">closed</div>
-          </div>
-        </div>
-        <!-- small equity curve hidden — big NSE Equity Curve chart below has the same data -->
-        <div style="height:80px;display:none"><canvas id="nse-eq-chart"></canvas></div>
-      </div>
-    </div>
-
-    <!-- NYSE Panel (hidden) -->
-    <div class="market-panel" style="display:none">
-      <div class="market-panel-header market-panel-nyse">
-        <span class="market-tag tag-nyse">◉ NYSE/NASDAQ</span>
-        <span style="font-size:11px;color:var(--label)">USA — Paper</span>
-        <span id="nyse-mkt-badge" style="margin-left:auto;font-size:10px;color:var(--muted)"></span>
-      </div>
-      <div class="market-panel-body">
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px">
-          <div class="mini-card">
-            <div class="metric-label">Portfolio $</div>
-            <div class="mini-val text-amber" id="nyse-portfolio">—</div>
-            <div class="metric-sub" id="nyse-portfolio-sub">total value</div>
-          </div>
-          <div class="mini-card">
-            <div class="metric-label">Cash $</div>
-            <div class="mini-val text-white" id="nyse-cash">—</div>
-            <div class="metric-sub" id="nyse-cash-pct">—</div>
-          </div>
-          <div class="mini-card">
-            <div class="metric-label">P&amp;L $</div>
-            <div class="mini-val" id="nyse-pnl">—</div>
-            <div class="metric-sub" id="nyse-pnl-pct">—</div>
-          </div>
-          <div class="mini-card">
-            <div class="metric-label">Win Rate</div>
-            <div class="mini-val text-green" id="nyse-wr">—</div>
-            <div class="metric-sub" id="nyse-wr-sub">—</div>
-          </div>
-          <div class="mini-card">
-            <div class="metric-label">Open</div>
-            <div class="mini-val text-cyan" id="nyse-open">—</div>
-            <div class="metric-sub">positions</div>
-          </div>
-          <div class="mini-card">
-            <div class="metric-label">Trades</div>
-            <div class="mini-val text-white" id="nyse-trades">—</div>
-            <div class="metric-sub">closed</div>
-          </div>
-        </div>
-        <div style="height:80px"><canvas id="nyse-eq-chart"></canvas></div>
-      </div>
-    </div>
-
-  </div>
-
-  <!-- ── Equity Curve + Signal Feed ── -->
-  <div class="charts-row">
-    <div class="card card-glow">
+  <!-- ─── Row: cooldown + regime + conf histogram ─── -->
+  <div class="grid-3">
+    <div class="card" title="Symbols that hit a stop-loss earlier today and are blocked from re-entry for the rest of the session. Resets tomorrow.">
       <div class="card-header">
-        <span class="card-title">NSE Equity Curve ₹</span>
-        <div style="display:flex;gap:16px;align-items:center">
-          <span class="card-sub" id="eq-range">loading…</span>
-          <span class="card-sub" id="eq-change" style="font-family:var(--mono)"></span>
-        </div>
+        <div class="card-title">Cooldown Active</div>
+        <div class="card-sub" id="cd-count">—</div>
       </div>
-      <div style="height:250px"><canvas id="eq-chart"></canvas></div>
+      <div id="cd-list" style="min-height:60px">—</div>
     </div>
-    <div class="card">
+    <div class="card" title="Regime breakdown of currently-open positions plus today's BUY entries. TRENDING_UP / SIDEWAYS / HIGH_VOL signals what kind of market the engine has been seeing.">
       <div class="card-header">
-        <span class="card-title">Signal Feed</span>
-        <span class="card-sub" id="sig-count">0 signals</span>
+        <div class="card-title">Regime Distribution</div>
+        <div class="card-sub" id="rd-count">—</div>
       </div>
-      <div id="signal-feed" style="max-height:210px;overflow-y:auto">
-        <div style="color:var(--muted);text-align:center;padding:30px 0;font-size:11px">Waiting for signals…</div>
+      <div id="rd-list" style="min-height:60px">—</div>
+    </div>
+    <div class="card" title="Histogram of confidence scores from the most recent engine tick. Green bars are above the 0.60 floor — that's where actual trades fire.">
+      <div class="card-header">
+        <div class="card-title">Confidence Distribution (last tick)</div>
+        <div class="card-sub" id="cd-conf-sub">—</div>
+      </div>
+      <div class="hist" id="conf-hist"></div>
+      <div class="hist-labels">
+        <span>0.0</span><span>0.1</span><span>0.2</span><span>0.3</span><span>0.4</span>
+        <span>0.5</span><span>0.6</span><span>0.7</span><span>0.8</span><span>0.9</span>
       </div>
     </div>
   </div>
 
-  <!-- ── NSE Open Positions ── -->
-  <div>
-    <div class="section-hdr"><span class="market-tag tag-nse" style="margin-right:4px">NSE</span> Open Positions</div>
-    <div class="card" style="overflow-x:auto">
+  <!-- ─── Row: sector exposure + sector P&L ─── -->
+  <div class="grid-2">
+    <div class="card" title="Where today's losses (and any wins) are coming from. Concentration in one sector tells you the model is biased by recent market mood.">
+      <div class="card-header">
+        <div class="card-title">Sector P&amp;L — Today</div>
+        <div class="card-sub" id="sec-pnl-sub">—</div>
+      </div>
+      <div id="sec-pnl-list" style="min-height:80px">—</div>
+    </div>
+    <div class="card" title="Notional rupee exposure of currently-open positions, split by sector. Empty when flat — also a signal.">
+      <div class="card-header">
+        <div class="card-title">Sector Exposure — Open</div>
+        <div class="card-sub" id="sec-open-sub">—</div>
+      </div>
+      <div id="sec-open-list" style="min-height:80px">—</div>
+    </div>
+  </div>
+
+  <!-- ─── Open positions table (with MAE/MFE) ─── -->
+  <div class="card" title="Currently open positions with Max Adverse / Max Favorable Excursion since entry. MAE close to SL distance = SL is biting hard. MFE close to target distance = engine should be closing soon.">
+    <div class="card-header">
+      <div class="card-title">Open Positions — Live MAE / MFE</div>
+      <div class="card-sub" id="op-count">0 open</div>
+    </div>
+    <div class="table-wrap">
       <table>
         <thead>
           <tr>
-            <th>Symbol</th><th>Entry Date</th><th>Shares</th><th>Entry ₹</th>
-            <th>Stop-Loss</th><th>Target</th><th>Regime</th><th>Confidence</th><th>Unrealised</th>
+            <th>Symbol</th><th>Sector</th><th>Entry</th><th>SL</th><th>Target</th>
+            <th>MAE %</th><th>MFE %</th><th>SL dist</th><th>TGT dist</th><th>Regime</th><th>Conf</th>
           </tr>
         </thead>
-        <tbody id="nse-pos-table">
-          <tr><td colspan="9" style="color:var(--muted);text-align:center;padding:20px">No open NSE positions</td></tr>
-        </tbody>
+        <tbody id="op-body"><tr><td colspan="11" class="empty">No open positions.</td></tr></tbody>
       </table>
     </div>
   </div>
 
-  <!-- ── NYSE Open Positions (hidden) ── -->
-  <div style="display:none">
-    <div class="section-hdr"><span class="market-tag tag-nyse" style="margin-right:4px">NYSE</span> Open Positions</div>
-    <div class="card" style="overflow-x:auto">
+  <!-- ─── Recent trades table (with R-multiple) ─── -->
+  <div class="card" title="Last 15 closed trades. R is the strategy-normalized P&L — 1.0R means a one-stop-loss-distance loss (or gain). +2.0R is a clean target hit.">
+    <div class="card-header">
+      <div class="card-title">Recent Trades — R-Multiple</div>
+      <div class="card-sub" id="tr-count">—</div>
+    </div>
+    <div class="table-wrap">
       <table>
         <thead>
           <tr>
-            <th>Symbol</th><th>Entry Date</th><th>Shares</th><th>Entry $</th>
-            <th>Stop-Loss</th><th>Target</th><th>Regime</th><th>Confidence</th><th>Unrealised</th>
+            <th>Time</th><th>Symbol</th><th>Sector</th><th>Reason</th>
+            <th>Return %</th><th>R-Multiple</th><th>Net P&amp;L</th><th>Conf</th>
           </tr>
         </thead>
-        <tbody id="nyse-pos-table">
-          <tr><td colspan="9" style="color:var(--muted);text-align:center;padding:20px">No open NYSE positions</td></tr>
-        </tbody>
+        <tbody id="tr-body"><tr><td colspan="8" class="empty">No trades.</td></tr></tbody>
       </table>
     </div>
   </div>
 
-  <!-- ── P&L Breakdown ── -->
-  <div class="market-charts">
-    <div class="card">
-      <div class="card-header">
-        <span class="card-title">Trade P&amp;L — Last 10</span>
-        <span class="card-sub" id="pnl-summary"></span>
-      </div>
-      <div id="pnl-bars" style="max-height:180px;overflow-y:auto"></div>
+  <!-- ─── EOD Equity Curve ─── -->
+  <div class="card" title="Daily portfolio total value over time. The shape of this curve is your strategy's actual track record.">
+    <div class="card-header">
+      <div class="card-title">Equity Curve — Daily Total Value</div>
+      <div class="card-sub" id="eq-sub">—</div>
     </div>
-    <div class="card">
-      <div class="card-header">
-        <span class="card-title">Win / Loss Ratio</span>
-        <span class="card-sub" id="wl-sub"></span>
-      </div>
-      <div style="height:160px;display:flex;align-items:center;justify-content:center">
-        <canvas id="wl-chart" style="max-width:160px;max-height:160px"></canvas>
-      </div>
-    </div>
+    <canvas id="equity-chart" height="80"></canvas>
   </div>
 
-  <!-- ── Watchlist ── -->
-  <div>
-    <div class="section-hdr">Watchlist</div>
-    <div class="watchlist-grid" id="watchlist-grid">
-      <div style="color:var(--muted);font-size:11px;padding:20px 0">Add symbols above…</div>
+  <!-- ─── Footer row: engine vitals (compact) ─── -->
+  <div class="footer-row">
+    <div class="metric" title="Whether the Python intraday engine process is alive on the laptop.">
+      <div class="metric-label">Engine</div>
+      <div class="metric-val" id="eng-state">—</div>
+      <div class="metric-sub" id="eng-sub">—</div>
+    </div>
+    <div class="metric" title="Whether the NSE market is open right now (09:15–15:30 IST, Mon-Fri).">
+      <div class="metric-label">Market</div>
+      <div class="metric-val" id="mkt-state">—</div>
+      <div class="metric-sub" id="mkt-sub">—</div>
+    </div>
+    <div class="metric" title="Signal generation latency. Engine logs warnings only when signals exceed the 1.0s gate. Healthy state = zero warnings.">
+      <div class="metric-label">Signal Latency</div>
+      <div class="metric-val" id="lat-state">—</div>
+      <div class="metric-sub" id="lat-sub">gate 1.0s</div>
+    </div>
+    <div class="metric" title="Last successful API refresh on this page.">
+      <div class="metric-label">Last Refresh</div>
+      <div class="metric-val" id="refresh-state">—</div>
+      <div class="metric-sub" id="refresh-sub">auto every 30s</div>
     </div>
   </div>
-
-  <!-- ── NYSE / NASDAQ Live Quotes (HIDDEN — NSE-only focus) ── -->
-  <div style="display:none">
-    <div class="section-hdr">
-      <span class="market-tag tag-nyse" style="margin-right:4px">NYSE/NASDAQ</span> Live Quotes
-      <span style="font-size:9px;padding:2px 8px;border-radius:10px;background:rgba(255,170,0,.1);color:var(--amber);border:1px solid rgba(255,170,0,.3);margin-left:4px">SIGNALS VIA YFINANCE REAL-TIME</span>
-    </div>
-    <div class="watchlist-grid" id="us-stocks-grid">
-      <div style="color:var(--muted);font-size:11px;padding:20px 0">Loading US stocks…</div>
-    </div>
-  </div>
-
-  <!-- ── Trade History (ALL) ── -->
-  <div>
-    <div class="section-hdr">NSE Trade History</div>
-    <div class="card" style="overflow-x:auto">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-        <div style="font-size:11px;color:var(--muted)" id="trades-info">—</div>
-        <div style="display:flex;align-items:center;gap:8px">
-          <!-- Market filter -->
-          <div style="display:flex;gap:4px">
-            <button class="pg-btn" id="filter-all" onclick="setMarketFilter('all')" style="display:none">ALL</button>
-            <button class="pg-btn active" id="filter-nse" onclick="setMarketFilter('nse')">
-              <span style="color:var(--cyan)">NSE</span>
-            </button>
-            <button class="pg-btn" id="filter-nyse" onclick="setMarketFilter('nyse')" style="display:none">
-              <span style="color:var(--amber)">NYSE</span>
-            </button>
-          </div>
-          <span style="font-size:11px;color:var(--label)">Rows</span>
-          <select id="trades-per-page" onchange="onPerPageChange()"
-            style="background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:3px 8px;color:var(--text);font-size:11px;font-family:var(--mono);cursor:pointer;outline:none">
-            <option value="10" selected>10</option>
-            <option value="25">25</option>
-            <option value="50">50</option>
-            <option value="all">All</option>
-          </select>
-        </div>
-      </div>
-      <table>
-        <thead>
-          <tr>
-            <th>Market</th><th>Symbol</th><th>Entry Time</th><th>Exit Time</th>
-            <th>Shares</th><th>Entry</th><th>Exit</th><th>Net P&amp;L</th><th>Return</th>
-            <th title="Model confidence at entry — only available for trades opened after P35 deploy">Conf</th>
-            <th title="Market regime detected at entry — TRENDING_UP / SIDEWAYS / TRENDING_DOWN / HIGH_VOL">Regime</th>
-            <th>Exit Reason</th>
-          </tr>
-        </thead>
-        <tbody id="trades-table">
-          <tr><td colspan="12" style="color:var(--muted);text-align:center;padding:20px">No closed trades yet</td></tr>
-        </tbody>
-      </table>
-      <div id="trades-pagination" style="display:flex;align-items:center;justify-content:center;gap:6px;margin-top:14px;flex-wrap:wrap"></div>
-    </div>
-  </div>
-
-  </div><!-- /tab-trading -->
-
-  <!-- ═════════════════════════════════════════════════════════════════════ -->
-  <!-- ── SYSTEM HEALTH TAB ── -->
-  <!-- ═════════════════════════════════════════════════════════════════════ -->
-  <div id="tab-health" class="tab-panel" style="display:none">
-
-    <!-- Top status row -->
-    <div class="metrics-row" style="grid-template-columns:repeat(4,1fr)">
-      <div class="metric-card" id="h-engine-card" title="Is the trading engine running right now? GREEN = healthy and working. RED = stopped or crashed (no trades being made).">
-        <div class="metric-label">◉ Engine</div>
-        <div class="metric-val" id="h-engine-val">—</div>
-        <div class="metric-sub" id="h-engine-sub">—</div>
-      </div>
-      <div class="metric-card" id="h-heartbeat-card" title="The engine writes a tiny 'I am alive' signal every 5 minutes. FRESH = engine is working. STALE = a bit slow. DEAD = engine is silent and probably stuck — you'll get a Telegram alert.">
-        <div class="metric-label">⚡ Heartbeat</div>
-        <div class="metric-val" id="h-heartbeat-val">—</div>
-        <div class="metric-sub" id="h-heartbeat-sub">—</div>
-      </div>
-      <div class="metric-card" id="h-mem-card" title="How much of the server's memory (RAM) is being used. Below 70% = healthy. 70-85% = warning. Above 85% = danger — engine may crash.">
-        <div class="metric-label">▤ VPS RAM</div>
-        <div class="metric-val" id="h-mem-val">—</div>
-        <div class="metric-sub" id="h-mem-sub">—</div>
-      </div>
-      <div class="metric-card" id="h-market-card" title="Is the Indian stock market (NSE) open for trading right now? Hours: 9:15 AM to 3:30 PM IST, Monday to Friday.">
-        <div class="metric-label">▤ Market</div>
-        <div class="metric-val" id="h-market-val">—</div>
-        <div class="metric-sub" id="h-market-sub">—</div>
-      </div>
-    </div>
-
-    <!-- Engine + Dashboard service detail -->
-    <div class="split-metrics">
-      <div class="card" title="Detailed status of the trading engine — the program that watches the market and places trades for you.">
-        <div class="card-header">
-          <span class="card-title">Intraday Engine — systemd</span>
-          <span class="card-sub" id="h-int-sub">—</span>
-        </div>
-        <div id="h-intraday-detail" class="kv-grid"></div>
-      </div>
-      <div class="card" title="Detailed status of the dashboard server — the program that shows you this web page.">
-        <div class="card-header">
-          <span class="card-title">Dashboard Service — systemd</span>
-          <span class="card-sub" id="h-dash-sub">—</span>
-        </div>
-        <div id="h-dashboard-detail" class="kv-grid"></div>
-      </div>
-    </div>
-
-    <!-- VPS + Pipeline -->
-    <div class="split-metrics">
-      <div class="card" title="The health of the cloud server (VPS) that runs your trading engine 24/7. If the server is sick, the engine cannot trade.">
-        <div class="card-header">
-          <span class="card-title">VPS Vitals</span>
-        </div>
-        <div id="h-vps-detail" class="kv-grid"></div>
-      </div>
-      <div class="card" title="Today's trading activity numbers — how many trades the engine opened, closed, and how fast it could think.">
-        <div class="card-header">
-          <span class="card-title">Pipeline Today</span>
-          <span class="card-sub" id="h-pipe-sub">—</span>
-        </div>
-        <div id="h-pipeline-detail" class="kv-grid"></div>
-      </div>
-    </div>
-
-    <!-- Errors / Warnings -->
-    <div class="split-metrics">
-      <div class="card" title="Serious problems the engine ran into today. If you see a lot of these, something is wrong.">
-        <div class="card-header">
-          <span class="card-title">Recent ERRORS</span>
-          <span class="card-sub" id="h-err-count">0</span>
-        </div>
-        <div id="h-errors" class="log-list">
-          <div style="color:var(--muted);font-size:11px">none</div>
-        </div>
-      </div>
-      <div class="card" title="Things the engine noticed but kept working. Mostly harmless, but worth a glance if many appear.">
-        <div class="card-header">
-          <span class="card-title">Recent WARNINGS</span>
-          <span class="card-sub" id="h-warn-count">0</span>
-        </div>
-        <div id="h-warnings" class="log-list">
-          <div style="color:var(--muted);font-size:11px">none</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="card-header">
-        <span class="card-title">Health endpoint last refresh</span>
-        <span class="card-sub"><span id="h-last-refresh">—</span> · auto-refresh 10s</span>
-      </div>
-    </div>
-
-  </div><!-- /tab-health -->
 
 </main>
 
 <script>
-const API = '';
-let watchlist = JSON.parse(localStorage.getItem('nxWatchlist') || '["RELIANCE.NS","TCS.NS","HDFCBANK.NS","AAPL","MSFT"]');
-let eqChart = null, wlChart = null, nseEqChart = null, nyseEqChart = null;
-let lastPortfolio = null;
-let _allTrades = [], _tradePage = 1, _marketFilter = 'nse';
+"use strict";
 
-// ── Helpers ──────────────────────────────────────────────────────────────
-const isN   = n => Number.isFinite(Number(n));
-const fmt   = (n,d=2) => isN(n) ? Number(n).toLocaleString('en-IN',{minimumFractionDigits:d,maximumFractionDigits:d}) : '—';
-const fmtM  = (n,usd=false) => isN(n) ? (usd?'$':'₹')+fmt(n) : '—';
-const fmtP  = n => isN(n) ? (Number(n)*100).toFixed(1)+'%' : '—';
-const fmtPM = (n,usd=false) => isN(n) ? (Number(n)>=0?'+':'')+fmtM(n,usd) : '—';
-const fmtPP = n => isN(n) ? (Number(n)>=0?'+':'')+fmtP(n) : '—';
-const isNSE = sym => (sym||'').endsWith('.NS');
+const API = "";       // same origin
+let equityChart = null;
 
-function fmt_dt(s) {
-  if (!s) return '—';
-  return s.slice(0,16).replace('T',' ');
-}
+// ── Helpers ──
+const $ = (id) => document.getElementById(id);
+const fmt = (n, d = 0) => n == null || isNaN(n) ? "—" : Number(n).toLocaleString("en-IN", { maximumFractionDigits: d, minimumFractionDigits: d });
+const fmtPct = (p, d = 2) => p == null || isNaN(p) ? "—" : (p * 100).toFixed(d) + "%";
+const fmtSigned = (n, d = 0) => {
+  if (n == null || isNaN(n)) return "—";
+  const s = n >= 0 ? "+" : "";
+  return s + Number(n).toLocaleString("en-IN", { maximumFractionDigits: d, minimumFractionDigits: d });
+};
+const colorOf = (n) => n > 0 ? "text-green" : n < 0 ? "text-red" : "text-muted";
 
-function badge(sig) {
-  const s = (sig||'HOLD').toUpperCase();
-  return `<span class="badge badge-${s.toLowerCase()}">${s==='BUY'?'▲':s==='SELL'?'▼':'─'} ${s}</span>`;
-}
-
-function regimeBadge(r) {
-  const k = (r||'unknown').toLowerCase().replace(/ /g,'_');
-  const icons = {trending_up:'↑',trending_down:'↓',sideways:'→',high_vol:'⚡',unknown:'?'};
-  return `<span class="badge badge-${k}">${icons[k]||'?'} ${(r||'?').replace(/_/g,' ')}</span>`;
-}
-
-function marketTag(sym) {
-  return isNSE(sym)
-    ? `<span class="market-tag tag-nse" style="font-size:9px;padding:2px 6px">NSE</span>`
-    : `<span class="market-tag tag-nyse" style="font-size:9px;padding:2px 6px">NYSE</span>`;
-}
-
-function exitBadge(reason) {
-  if (reason === 'target')          return `<span style="color:var(--green);font-size:10px">🎯 Target</span>`;
-  if (reason === 'stop_loss')       return `<span style="color:var(--red);font-size:10px">🛡 Stop</span>`;
-  if (reason === 'force_close_eod') return `<span style="color:var(--amber);font-size:10px">⏱ EOD</span>`;
-  return `<span style="color:var(--muted);font-size:10px">${reason||'—'}</span>`;
-}
-
-function anomalyFlag(ret) {
-  // Flag any single trade with >200% return as suspicious
-  if (Math.abs(ret) > 2.0)
-    return ` <span class="badge badge-warn" title="Return exceeds 200% — verify price data">⚠ CHECK</span>`;
-  return '';
-}
-
-function setText(id, val, cls='') {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.textContent = val;
-  if (cls) el.className = `metric-val ${cls}`;
-  el.classList.add('flash');
-  setTimeout(()=>el.classList.remove('flash'), 400);
-}
-function setMini(id, val, cls='') {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.textContent = val;
-  if (cls) el.className = `mini-val ${cls}`;
-}
-
-// ── Clock ────────────────────────────────────────────────────────────────
-function updateClock() {
-  const now = new Date();
-  const ist = new Date(now.toLocaleString('en-US',{timeZone:'Asia/Kolkata'}));
-  document.getElementById('live-clock').textContent =
-    `${String(ist.getHours()).padStart(2,'0')}:${String(ist.getMinutes()).padStart(2,'0')}:${String(ist.getSeconds()).padStart(2,'0')}`;
-
-  const nseOpen = ist.getDay()>=1 && ist.getDay()<=5 &&
-    (ist.getHours()>9||(ist.getHours()===9&&ist.getMinutes()>=15)) &&
-    (ist.getHours()<15||(ist.getHours()===15&&ist.getMinutes()<=30));
-  const nseEl = document.getElementById('market-status');
-  nseEl.textContent = nseOpen?'OPEN':'CLOSED';
-  nseEl.style.color = nseOpen?'var(--green)':'var(--red)';
-
-  const et = new Date(now.toLocaleString('en-US',{timeZone:'America/New_York'}));
-  document.getElementById('et-clock').textContent =
-    `${String(et.getHours()).padStart(2,'0')}:${String(et.getMinutes()).padStart(2,'0')}:${String(et.getSeconds()).padStart(2,'0')}`;
-
-  const nyseOpen = et.getDay()>=1 && et.getDay()<=5 &&
-    (et.getHours()>9||(et.getHours()===9&&et.getMinutes()>=30)) && et.getHours()<16;
-  const nyseEl = document.getElementById('nyse-status');
-  nyseEl.textContent = nyseOpen?'OPEN':'CLOSED';
-  nyseEl.style.color = nyseOpen?'var(--green)':'var(--red)';
-
-  const active = nyseOpen ? et : ist;
-  const tot = (5-(active.getMinutes()%5)-1)*60 + (60-active.getSeconds());
-  document.getElementById('next-scan').textContent =
-    `${String(Math.floor(tot/60)).padStart(2,'0')}:${String(tot%60).padStart(2,'0')}`;
-}
-setInterval(updateClock,1000); updateClock();
-
-// ── Connectivity ──────────────────────────────────────────────────────────
-function setConn(ok) {
-  document.getElementById('conn-dot').className = `dot ${ok?'dot-green':'dot-red'}`;
-  const t = document.getElementById('conn-text');
-  t.textContent = ok?'LIVE':'ERROR';
-  t.style.color = ok?'var(--green)':'var(--red)';
-}
-
-// ── Portfolio ──────────────────────────────────────────────────────────────
-async function loadPortfolio() {
+async function J(path) {
   try {
-    const pf = await fetch(`${API}/api/portfolio`).then(r=>r.json());
-    lastPortfolio = pf;
-
-    // ── NSE top cards (₹) ──
-    const n = pf.nse || {};
-    setText('m-nse-total', fmtM(n.total_value), 'metric-val text-cyan glow-cyan');
-    const nPnl = n.total_pnl || 0;
-    document.getElementById('m-nse-total-sub').textContent =
-      isN(nPnl) ? (nPnl>=0?'+':'')+fmtM(nPnl)+' P&L' : 'no trades yet';
-    setText('m-nse-cash', fmtM(n.cash));
-    document.getElementById('m-nse-cash-pct').textContent = isN(n.cash)&&n.total_value>0
-      ? ((n.cash/n.total_value)*100).toFixed(1)+'% in cash' : '—';
-
-    // ── NYSE top cards ($) ──
-    const y = pf.nyse || {};
-    setText('m-nyse-total', fmtM(y.total_value, true), 'metric-val text-amber');
-    const yPnl = y.total_pnl || 0;
-    document.getElementById('m-nyse-total-sub').textContent =
-      isN(yPnl) ? (yPnl>=0?'+':'')+fmtM(yPnl,true)+' P&L' : 'no trades yet';
-    setText('m-nyse-cash', fmtM(y.cash, true));
-    document.getElementById('m-nyse-cash-pct').textContent = isN(y.cash)&&y.total_value>0
-      ? ((y.cash/y.total_value)*100).toFixed(1)+'% in cash' : '—';
-
-    // ── Win rate + open positions (dimensionless — safe to combine) ──
-    const wt = pf.n_trades||0, wr = pf.win_rate||0;
-    setText('m-wr', fmtP(wr), 'metric-val text-green');
-    const wn = Math.round(wr*wt);
-    document.getElementById('m-wr-sub').textContent = wt ? `${wn}W / ${wt-wn}L of ${wt} trades` : 'no trades yet';
-
-    const openPos = pf.open_positions||[];
-    const nseOpen = openPos.filter(p=>isNSE(p.symbol)).length;
-    const nyseOpen = openPos.filter(p=>!isNSE(p.symbol)).length;
-    setText('m-open', openPos.length, 'metric-val text-cyan');
-    document.getElementById('m-open-sub').textContent = `NSE ${nseOpen} · NYSE ${nyseOpen}`;
-
-    renderPositions(openPos);
-
-    // ── Per-market panels from API ──
-    if (pf.nse) {
-      const n = pf.nse;
-      setMini('nse-portfolio', fmtM(n.total_value), 'mini-val text-cyan');
-      setMini('nse-cash', fmtM(n.cash));
-      const el = document.getElementById('nse-cash-pct');
-      if (el) el.textContent = n.total_value > 0 ? ((n.cash/n.total_value)*100).toFixed(1)+'% in cash' : '—';
-      const pnlEl = document.getElementById('nse-pnl');
-      if (pnlEl) { pnlEl.textContent = fmtPM(n.total_pnl); pnlEl.className = `mini-val ${n.total_pnl>=0?'text-green':'text-red'}`; }
-      setMini('nse-pnl-pct', fmtPP(n.pnl_pct));
-      setMini('nse-wr', fmtP(n.win_rate), n.win_rate>=0.5?'mini-val text-green':'mini-val text-red');
-      const nWn = Math.round((n.win_rate||0)*n.n_trades);
-      const nWrSub = document.getElementById('nse-wr-sub');
-      if (nWrSub) nWrSub.textContent = n.n_trades ? `${nWn}W / ${n.n_trades-nWn}L` : 'no trades';
-      setMini('nse-trades', n.n_trades);
-      const sub = document.getElementById('nse-portfolio-sub');
-      if (sub) sub.textContent = `init ₹${(n.initial_cash/1000).toFixed(0)}K`;
-    }
-    if (pf.nyse) {
-      const y = pf.nyse;
-      setMini('nyse-portfolio', fmtM(y.total_value, true), 'mini-val text-amber');
-      setMini('nyse-cash', fmtM(y.cash, true));
-      const el = document.getElementById('nyse-cash-pct');
-      if (el) el.textContent = y.total_value > 0 ? ((y.cash/y.total_value)*100).toFixed(1)+'% in cash' : '—';
-      const pnlEl = document.getElementById('nyse-pnl');
-      if (pnlEl) { pnlEl.textContent = fmtPM(y.total_pnl, true); pnlEl.className = `mini-val ${y.total_pnl>=0?'text-green':'text-red'}`; }
-      setMini('nyse-pnl-pct', fmtPP(y.pnl_pct));
-      setMini('nyse-wr', fmtP(y.win_rate), y.win_rate>=0.5?'mini-val text-green':'mini-val text-red');
-      const yWn = Math.round((y.win_rate||0)*y.n_trades);
-      const yWrSub = document.getElementById('nyse-wr-sub');
-      if (yWrSub) yWrSub.textContent = y.n_trades ? `${yWn}W / ${y.n_trades-yWn}L` : 'no trades';
-      setMini('nyse-trades', y.n_trades);
-      const sub = document.getElementById('nyse-portfolio-sub');
-      if (sub) sub.textContent = `init $${(y.initial_cash/1000).toFixed(0)}K`;
-    }
-
-    setConn(true);
-  } catch(e) { setConn(false); }
-}
-
-function renderPositions(positions) {
-  const nse  = positions.filter(p => isNSE(p.symbol));
-  const nyse = positions.filter(p => !isNSE(p.symbol));
-
-  const makeRow = (p, usd) => {
-    const conf = (p.confidence||0)*100;
-    const entryDate = p.entry_time ? fmt_dt(p.entry_time) : '—';
-    return `<tr>
-      <td class="mono" style="font-weight:700;color:var(--text)">${p.symbol}</td>
-      <td style="font-size:11px;color:var(--muted)">${entryDate}</td>
-      <td class="mono">${p.shares}</td>
-      <td class="mono">${fmtM(p.entry_price,usd)}</td>
-      <td class="mono" style="color:var(--red)">${fmtM(p.stop_loss,usd)}</td>
-      <td class="mono" style="color:var(--green)">${fmtM(p.target,usd)}</td>
-      <td>${regimeBadge(p.regime)}</td>
-      <td>
-        <div style="display:flex;align-items:center;gap:6px">
-          <div style="width:50px;height:3px;background:var(--bg3);border-radius:2px;overflow:hidden">
-            <div style="width:${conf.toFixed(0)}%;height:100%;background:var(--cyan);border-radius:2px"></div>
-          </div>
-          <span class="mono" style="font-size:11px">${conf.toFixed(0)}%</span>
-        </div>
-      </td>
-      <td class="mono" style="color:var(--muted);font-size:10px">—</td>
-    </tr>`;
-  };
-
-  const nseEl = document.getElementById('nse-pos-table');
-  nseEl.innerHTML = nse.length
-    ? nse.map(p=>makeRow(p,false)).join('')
-    : '<tr><td colspan="9" style="color:var(--muted);text-align:center;padding:20px">No open NSE positions</td></tr>';
-
-  const nyseEl = document.getElementById('nyse-pos-table');
-  nyseEl.innerHTML = nyse.length
-    ? nyse.map(p=>makeRow(p,true)).join('')
-    : '<tr><td colspan="9" style="color:var(--muted);text-align:center;padding:20px">No open NYSE positions</td></tr>';
-
-  document.getElementById('nse-open').textContent = nse.length;
-  document.getElementById('nyse-open').textContent = nyse.length;
-}
-
-// ── Market-split stats (trade-history fallback — primary data from loadPortfolio) ──
-function updateMarketStats(trades) {
-  // Only fill fields not already set by pf.nse/pf.nyse (i.e. when API returns no per-market block)
-  if (lastPortfolio?.nse && lastPortfolio?.nyse) return;
-  const initial = parseFloat(lastPortfolio?.initial_cash)||100000;
-  ['nse','nyse'].forEach(mkt => {
-    const usd = mkt==='nyse';
-    const sub = mkt==='nse'
-      ? trades.filter(t=>isNSE(t.symbol))
-      : trades.filter(t=>!isNSE(t.symbol));
-    const pnl   = sub.reduce((s,t)=>s+(t.net_pnl||0),0);
-    const wr    = sub.length ? sub.filter(t=>t.net_pnl>=0).length/sub.length : 0;
-    const wn    = Math.round(wr*sub.length);
-    const pnlEl = document.getElementById(`${mkt}-pnl`);
-    if (pnlEl) { pnlEl.textContent = fmtPM(pnl,usd); pnlEl.className = `mini-val ${pnl>=0?'text-green':'text-red'}`; }
-    setMini(`${mkt}-pnl-pct`, fmtPP(pnl/initial));
-    setMini(`${mkt}-wr`, fmtP(wr), sub.length ? (wr>=0.5?'mini-val text-green':'mini-val text-red') : 'mini-val text-muted');
-    const wrSub = document.getElementById(`${mkt}-wr-sub`);
-    if (wrSub) wrSub.textContent = sub.length ? `${wn}W / ${sub.length-wn}L` : 'no trades';
-    setMini(`${mkt}-trades`, sub.length);
-  });
-}
-
-// ── Market mini equity charts ─────────────────────────────────────────────
-function renderMarketEquity(canvasId, trades, initialCash, usd, oldChart) {
-  const canvas = document.getElementById(canvasId);
-  if (!canvas) return oldChart;
-  if (oldChart) { try { oldChart.destroy(); } catch(e) {} }
-  const sorted = [...trades].sort((a,b)=>(a.exit_time||'')<(b.exit_time||'')?-1:1);
-  if (!sorted.length) return null;
-  let cum = initialCash;
-  const labels = [''];
-  const values = [cum];
-  sorted.forEach(t => { cum += (t.net_pnl||0); labels.push(''); values.push(cum); });
-  const pos = values[values.length-1] >= initialCash;
-  const lc = pos ? '#00ff88' : '#ff3366';
-  const gc = pos ? 'rgba(0,255,136,' : 'rgba(255,51,102,';
-  const ctx = canvas.getContext('2d');
-  const grad = ctx.createLinearGradient(0,0,0,80);
-  grad.addColorStop(0, gc+'0.3)'); grad.addColorStop(1, gc+'0)');
-  return new Chart(ctx, {
-    type:'line',
-    data:{ labels, datasets:[{ data:values, borderColor:lc, backgroundColor:grad,
-      borderWidth:1.5, pointRadius:0, fill:true, tension:0.35 }] },
-    options:{ responsive:true, maintainAspectRatio:false,
-      plugins:{ legend:{display:false}, tooltip:{enabled:false} },
-      scales:{
-        x:{display:false},
-        y:{ display:true, position:'right', grid:{color:'rgba(255,255,255,.04)'},
-          ticks:{ color:'#4a5568', font:{family:'JetBrains Mono',size:8}, maxTicksLimit:3,
-            callback:v=>usd?'$'+(v/1000).toFixed(0)+'K':'₹'+(v/1000).toFixed(0)+'K' },
-          border:{display:false} }
-      }}});
-}
-
-// ── Trades ────────────────────────────────────────────────────────────────
-async function loadTrades() {
-  try {
-    const trades = await fetch(`${API}/api/portfolio/trades?limit=500`).then(r=>r.json());
-    _allTrades = trades;
-    _tradePage = 1;
-    updateMarketStats(trades);
-    renderTrades();
-    renderPnlBars(trades.slice(0,10));
-    renderSignalFeed(trades.slice(0,8));
-    renderWinLoss(trades);
-    // Per-market mini equity curves
-    const nseTrades  = trades.filter(t=>isNSE(t.symbol));
-    const nyseTrades = trades.filter(t=>!isNSE(t.symbol));
-    const nseInit  = parseFloat(lastPortfolio?.nse?.initial_cash)  || 100000;
-    const nyseInit = parseFloat(lastPortfolio?.nyse?.initial_cash) || 100000;
-    nseEqChart  = renderMarketEquity('nse-eq-chart',  nseTrades,  nseInit,  false, nseEqChart);
-    nyseEqChart = renderMarketEquity('nyse-eq-chart', nyseTrades, nyseInit, true,  nyseEqChart);
-  } catch(e) {}
-}
-
-function setMarketFilter(mkt) {
-  _marketFilter = mkt;
-  _tradePage = 1;
-  ['all','nse','nyse'].forEach(m => {
-    const btn = document.getElementById(`filter-${m}`);
-    if (btn) btn.classList.toggle('active', m===mkt);
-  });
-  renderTrades();
-}
-
-function _getPerPage() {
-  const v = document.getElementById('trades-per-page')?.value;
-  return v==='all' ? Infinity : (parseInt(v)||10);
-}
-function onPerPageChange() { _tradePage=1; renderTrades(); }
-function goToPage(p) { _tradePage=p; renderTrades(); }
-
-function renderTrades() {
-  let trades = _allTrades;
-  if (_marketFilter==='nse')  trades = trades.filter(t=>isNSE(t.symbol));
-  if (_marketFilter==='nyse') trades = trades.filter(t=>!isNSE(t.symbol));
-
-  const perPage = _getPerPage(), total = trades.length;
-  if (!total) {
-    document.getElementById('trades-table').innerHTML =
-      '<tr><td colspan="10" style="color:var(--muted);text-align:center;padding:20px">No closed trades yet</td></tr>';
-    document.getElementById('trades-info').textContent='';
-    document.getElementById('trades-pagination').innerHTML='';
-    return;
+    const r = await fetch(API + path, { cache: "no-store" });
+    if (!r.ok) throw new Error(r.status);
+    return await r.json();
+  } catch (e) {
+    return null;
   }
-
-  const totalPages = perPage===Infinity ? 1 : Math.ceil(total/perPage);
-  _tradePage = Math.min(_tradePage, totalPages);
-  const start = perPage===Infinity ? 0 : (_tradePage-1)*perPage;
-  const end   = perPage===Infinity ? total : Math.min(start+perPage, total);
-  const page  = trades.slice(start, end);
-
-  document.getElementById('trades-info').textContent =
-    perPage===Infinity ? `Showing all ${total} trades` : `Showing ${start+1}–${end} of ${total} trades`;
-
-  const usd = sym => !isNSE(sym);
-  document.getElementById('trades-table').innerHTML = page.map(t => {
-    const pos = t.net_pnl >= 0;
-    const col = pos ? 'var(--green)' : 'var(--red)';
-    const warn = anomalyFlag(t.return_pct||0);
-    // P35: confidence + regime — backfilled NULL for trades closed before May 19 09:50 IST.
-    const confDisplay = (t.confidence != null)
-      ? `<span class="mono" style="color:${t.confidence >= 0.70 ? 'var(--green)' : t.confidence >= 0.60 ? 'var(--cyan)' : 'var(--label)'};font-weight:600">${(t.confidence * 100).toFixed(0)}%</span>`
-      : `<span style="color:var(--muted)">—</span>`;
-    const regimeDisplay = t.regime
-      ? `<span class="mono" style="font-size:11px;color:${t.regime === 'TRENDING_UP' ? 'var(--green)' : t.regime === 'TRENDING_DOWN' ? 'var(--red)' : t.regime === 'HIGH_VOL' ? 'var(--amber)' : 'var(--label)'}">${t.regime}</span>`
-      : `<span style="color:var(--muted)">—</span>`;
-    return `<tr>
-      <td>${marketTag(t.symbol)}</td>
-      <td class="mono" style="font-weight:700;color:var(--text)">${t.symbol}</td>
-      <td style="font-size:11px;color:var(--muted)">${fmt_dt(t.entry_time)}</td>
-      <td style="font-size:11px;color:var(--muted)">${fmt_dt(t.exit_time)}</td>
-      <td class="mono">${t.shares}</td>
-      <td class="mono">${fmtM(t.entry_price,usd(t.symbol))}</td>
-      <td class="mono">${fmtM(t.exit_price,usd(t.symbol))}</td>
-      <td class="mono" style="color:${col};font-weight:700">${fmtPM(t.net_pnl,usd(t.symbol))}</td>
-      <td class="mono" style="color:${col}">${fmtPP(t.return_pct)}${warn}</td>
-      <td>${confDisplay}</td>
-      <td>${regimeDisplay}</td>
-      <td>${exitBadge(t.exit_reason)}</td>
-    </tr>`;
-  }).join('');
-
-  // Pagination
-  const pg = document.getElementById('trades-pagination');
-  if (totalPages<=1) { pg.innerHTML=''; return; }
-  const cur = _tradePage;
-  let html = `<button class="pg-btn" onclick="goToPage(${cur-1})" ${cur===1?'disabled':''}>‹</button>`;
-  if (totalPages<=7) {
-    for (let p=1;p<=totalPages;p++) html+=`<button class="pg-btn${p===cur?' active':''}" onclick="goToPage(${p})">${p}</button>`;
-  } else {
-    html+=`<button class="pg-btn${1===cur?' active':''}" onclick="goToPage(1)">1</button>`;
-    if (cur>3) html+=`<span style="color:var(--muted);font-size:11px">…</span>`;
-    for (let p=Math.max(2,cur-1);p<=Math.min(totalPages-1,cur+1);p++)
-      html+=`<button class="pg-btn${p===cur?' active':''}" onclick="goToPage(${p})">${p}</button>`;
-    if (cur<totalPages-2) html+=`<span style="color:var(--muted);font-size:11px">…</span>`;
-    html+=`<button class="pg-btn${totalPages===cur?' active':''}" onclick="goToPage(${totalPages})">${totalPages}</button>`;
-  }
-  html+=`<button class="pg-btn" onclick="goToPage(${cur+1})" ${cur===totalPages?'disabled':''}>›</button>`;
-  pg.innerHTML = html;
 }
 
-function renderPnlBars(trades) {
-  const container = document.getElementById('pnl-bars');
-  if (!trades.length) { container.innerHTML='<div style="color:var(--muted);font-size:11px;padding:20px 0">No trades yet</div>'; return; }
-  const max = Math.max(...trades.map(t=>Math.abs(t.net_pnl||0)),1);
-  const wins = trades.filter(t=>t.net_pnl>=0).length;
-  document.getElementById('pnl-summary').textContent=`${wins}W / ${trades.length-wins}L`;
-  container.innerHTML = trades.map(t => {
-    const pos = t.net_pnl>=0, w=(Math.abs(t.net_pnl)/max*100).toFixed(1);
-    const col = pos?'var(--green)':'var(--red)';
-    const usd = !isNSE(t.symbol);
-    return `<div class="pnl-bar-wrap">
-      <div class="pnl-sym" style="color:var(--text)">${marketTag(t.symbol)} ${t.symbol}</div>
-      <div class="pnl-bar-bg"><div class="pnl-bar-fill" style="width:${w}%;background:${col}"></div></div>
-      <div class="pnl-val" style="color:${col}">${fmtPM(t.net_pnl,usd)}</div>
-    </div>`;
-  }).join('');
-}
-
-function renderSignalFeed(trades) {
-  const feed = document.getElementById('signal-feed');
-  document.getElementById('sig-count').textContent=`${trades.length} signals`;
-  if (!trades.length) {
-    feed.innerHTML='<div style="color:var(--muted);text-align:center;padding:30px 0;font-size:11px">No signals yet</div>';
-    return;
-  }
-  feed.innerHTML = trades.map(t => {
-    const isOpen = !t.exit_time;
-    const sig = isOpen?'BUY':(t.net_pnl>=0?'BUY':'SELL');
-    const time = fmt_dt(t.entry_time).slice(11,16);
-    const usd  = !isNSE(t.symbol);
-    return `<div class="signal-item signal-${sig.toLowerCase()}">
-      <div style="display:flex;align-items:center;gap:8px">
-        ${badge(sig)} ${marketTag(t.symbol)}
-        <span class="mono" style="font-weight:700;font-size:12px">${t.symbol}</span>
-      </div>
-      <div style="text-align:right">
-        <div class="mono" style="font-size:12px">${fmtM(t.entry_price,usd)}</div>
-        <div style="font-size:9px;color:var(--muted)">${time}${isNSE(t.symbol)?' IST':' ET'}${isOpen?' · OPEN':''}</div>
-      </div>
-    </div>`;
-  }).join('');
-}
-
-function renderWinLoss(trades) {
-  const wins = trades.filter(t=>t.net_pnl>=0).length;
-  const loss = trades.length-wins;
-  document.getElementById('wl-sub').textContent=trades.length?`${trades.length} total trades`:'no trades';
-  if (wlChart) wlChart.destroy();
-  if (!trades.length) return;
-  wlChart = new Chart(document.getElementById('wl-chart').getContext('2d'),{
-    type:'doughnut',
-    data:{labels:['Wins','Losses'],datasets:[{data:[wins,loss],
-      backgroundColor:['rgba(0,255,136,.7)','rgba(255,51,102,.7)'],
-      borderColor:['rgba(0,255,136,1)','rgba(255,51,102,1)'],borderWidth:1}]},
-    options:{responsive:true,maintainAspectRatio:false,cutout:'65%',
-      plugins:{legend:{display:false},
-        tooltip:{callbacks:{label:ctx=>` ${ctx.label}: ${ctx.raw} (${((ctx.raw/trades.length)*100).toFixed(0)}%)`}}}}
-  });
-}
-
-// ── Equity ────────────────────────────────────────────────────────────────
-async function loadEquity() {
-  try {
-    // NSE-only equity curve — built from NSE trade history (currencies don't mix)
-    const trades = _allTrades.filter(t => isNSE(t.symbol));
-    const sorted = [...trades].sort((a,b)=>(a.exit_time||'')<(b.exit_time||'')?-1:1);
-    const initial = parseFloat(lastPortfolio?.nse?.initial_cash) || 100000;
-    let cum = initial;
-    const labels = ['Start'];
-    const values = [cum];
-    if (!sorted.length) {
-      // No trades yet — render a flat baseline so chart isn't blank
-      const now = new Date();
-      for (let i = 1; i <= 10; i++) labels.push(''), values.push(initial);
-      document.getElementById('eq-range').textContent = `No NSE trades yet — flat at ₹${initial.toLocaleString('en-IN')}`;
-      document.getElementById('eq-change').textContent = '';
-    } else {
-      sorted.forEach(t => { cum += (t.net_pnl||0); labels.push(fmt_dt(t.exit_time).slice(5,16)); values.push(cum); });
-    }
-    const first=values[0], last=values[values.length-1], chg=last-first, pos=chg>=0;
-    const lc=pos?'#00ff88':'#ff3366', gc=pos?'rgba(0,255,136,':'rgba(255,51,102,';
-    if (sorted.length) {
-      document.getElementById('eq-range').textContent=`${labels[0]} → ${labels[labels.length-1]}  (${sorted.length} trades)`;
-    }
-    const chgEl=document.getElementById('eq-change');
-    chgEl.textContent=`${pos?'+':''}${fmtM(chg)}`; chgEl.style.color=lc;
-    if (eqChart) eqChart.destroy();
-    const ctx=document.getElementById('eq-chart').getContext('2d');
-    const grad=ctx.createLinearGradient(0,0,0,250);
-    grad.addColorStop(0,gc+'0.25)'); grad.addColorStop(.5,gc+'0.08)'); grad.addColorStop(1,gc+'0)');
-    const step=Math.max(1,Math.floor(labels.length/10));
-    eqChart = new Chart(ctx,{type:'line',data:{
-      labels:labels.map((l,i)=>i%step===0?l:''),
-      datasets:[
-        {data:values.map(()=>first),borderColor:'rgba(255,255,255,.12)',borderWidth:1,borderDash:[4,4],pointRadius:0,fill:false,tension:0,order:2},
-        {data:values,borderColor:lc,backgroundColor:grad,borderWidth:2.5,pointRadius:0,pointHoverRadius:5,fill:true,tension:.35,order:1}
-      ]},
-      options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},
-        plugins:{legend:{display:false},
-          tooltip:{backgroundColor:'rgba(6,8,16,.95)',borderColor:'rgba(0,212,255,.3)',borderWidth:1,
-            titleColor:'#4a5568',bodyColor:'#e2e8f0',padding:10,
-            callbacks:{title:items=>labels[items[0].dataIndex],
-              label:item=>{if(item.datasetIndex===0)return null;
-                const v=item.raw,diff=v-first,pct=((diff/first)*100).toFixed(2);
-                return [` Value: ₹${Number(v).toLocaleString('en-IN',{maximumFractionDigits:2})}`,
-                        ` vs start: ${diff>=0?'+':''}₹${Number(diff).toLocaleString('en-IN',{maximumFractionDigits:2})} (${diff>=0?'+':''}${pct}%)`];},
-              labelColor:()=>({backgroundColor:lc,borderColor:lc})}}},
-        scales:{x:{grid:{display:false},ticks:{color:'#4a5568',font:{family:'JetBrains Mono',size:9},maxRotation:0,autoSkip:false},border:{color:'rgba(0,212,255,.1)'}},
-          y:{position:'right',grid:{color:'rgba(255,255,255,.04)'},
-            ticks:{color:'#718096',font:{family:'JetBrains Mono',size:10},padding:8,
-              callback:v=>v>=100000?'₹'+(v/1000).toFixed(0)+'K':'₹'+Number(v).toLocaleString('en-IN',{maximumFractionDigits:0})},
-            border:{display:false}}}}});
-  } catch(e) { console.error('loadEquity failed:', e); }
-}
-
-// ── Watchlist ──────────────────────────────────────────────────────────────
-async function renderWatchlist() {
-  const grid=document.getElementById('watchlist-grid');
-  const positions=lastPortfolio?.open_positions||[];
-  const posMap={};
-  positions.forEach(p=>posMap[p.symbol]=p);
-  if (!watchlist.length) {
-    grid.innerHTML='<div style="color:var(--muted);font-size:11px;padding:20px 0">Add symbols above…</div>';
-    return;
-  }
-  grid.innerHTML=watchlist.map(sym=>{
-    const pos=posMap[sym], hasPos=!!pos, conf=(pos?.confidence||0)*100;
-    const usd=!isNSE(sym);
-    return `<div class="watch-card" style="border-color:${hasPos?'rgba(0,255,136,.4)':'var(--border)'}">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div style="display:flex;align-items:center;gap:6px">
-          ${marketTag(sym)}
-          <span class="watch-sym">${sym}</span>
-        </div>
-        <div style="display:flex;gap:6px;align-items:center">
-          ${hasPos?badge('BUY'):'<span style="font-size:10px;color:var(--muted)">WATCHING</span>'}
-          <button onclick="removeSymbol('${sym}')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:12px"
-            onmouseover="this.style.color='var(--red)'" onmouseout="this.style.color='var(--muted)'">✕</button>
-        </div>
-      </div>
-      ${hasPos?`
-        <div class="watch-price text-green">${fmtM(pos.entry_price,usd)}</div>
-        <div class="watch-row"><span class="watch-key">Stop</span><span class="watch-v text-red">${fmtM(pos.stop_loss,usd)}</span></div>
-        <div class="watch-row"><span class="watch-key">Target</span><span class="watch-v text-green">${fmtM(pos.target,usd)}</span></div>
-        <div class="watch-row"><span class="watch-key">Entry</span><span class="watch-v" style="font-size:10px;color:var(--muted)">${fmt_dt(pos.entry_time)}</span></div>
-        <div class="watch-row"><span class="watch-key">Regime</span><span>${regimeBadge(pos.regime)}</span></div>
-        <div class="conf-bar"><div class="conf-fill" style="width:${conf.toFixed(0)}%;background:var(--cyan)"></div></div>
-        <div style="font-size:9px;color:var(--muted);margin-top:3px">Confidence: ${conf.toFixed(0)}%</div>
-      `:`<div class="watch-price text-muted">—</div>
-        <div style="font-size:10px;color:var(--muted);margin-top:4px">No active position</div>`}
-    </div>`;
-  }).join('');
-}
-
-function addSymbol() {
-  const input=document.getElementById('sym-input');
-  const sym=input.value.trim().toUpperCase();
-  if (!sym||watchlist.includes(sym)){input.value='';return;}
-  watchlist.push(sym);
-  localStorage.setItem('nxWatchlist',JSON.stringify(watchlist));
-  input.value=''; renderWatchlist();
-}
-function removeSymbol(sym) {
-  watchlist=watchlist.filter(s=>s!==sym);
-  localStorage.setItem('nxWatchlist',JSON.stringify(watchlist));
-  renderWatchlist();
-}
-document.getElementById('sym-input').addEventListener('keydown',e=>{if(e.key==='Enter')addSymbol();});
-
-// ── Theme ──────────────────────────────────────────────────────────────────
+// ── Theme ──
 function applyTheme(t) {
-  document.documentElement.setAttribute('data-theme',t);
-  document.getElementById('theme-btn').textContent=t==='light'?'🌙':'☀️';
-  localStorage.setItem('nxTheme',t);
+  document.documentElement.setAttribute("data-theme", t);
+  $("theme-btn").textContent = t === "light" ? "☀️" : "🌙";
+  localStorage.setItem("theme", t);
 }
-function toggleTheme() { applyTheme(document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark'); }
-applyTheme(localStorage.getItem('nxTheme')||'dark');
+function toggleTheme() {
+  const cur = document.documentElement.getAttribute("data-theme") || "dark";
+  applyTheme(cur === "light" ? "dark" : "light");
+}
+applyTheme(localStorage.getItem("theme") || "dark");
 
-// ── Indices / US stocks ────────────────────────────────────────────────────
-let _indicesData=[],_usStocksData=[];
+// ── IST clock ──
+function tickClock() {
+  const now = new Date();
+  const ist = new Date(now.getTime() + (5.5 * 3600 - now.getTimezoneOffset() * 60) * 1000);
+  $("ist-clock").textContent = ist.toISOString().substr(11, 8) + " IST";
+}
+setInterval(tickClock, 1000);
+tickClock();
 
-async function loadIndices() {
-  try {
-    const data=await fetch(`${API}/api/market/indices`).then(r=>r.json());
-    if (data.length){_indicesData=data;renderTicker();renderSentiment();}
-  } catch(e){}
+// ── Force-close & budget strip ──
+async function refreshStrip() {
+  const fc = await J("/api/dashboard/force_close");
+  if (fc) {
+    $("fc-label").textContent = fc.label || "—";
+    $("fc-sub").textContent = fc.is_past ? "session ended" : fc.is_weekend ? "weekend" : "session active";
+    const sc = $("strip-clock");
+    sc.querySelector(".strip-icon").textContent = fc.is_past ? "✓" : (fc.is_weekend ? "🛌" : "⏱");
+  }
+
+  const b = await J("/api/dashboard/daily_loss_budget");
+  if (b && !b.error) {
+    $("budget-val").textContent = "₹" + fmt(b.remaining) + " left";
+    $("budget-sub").textContent = "spent ₹" + fmt(b.spent) + " / ₹" + fmt(b.budget_total) + " (" + (b.pct_used * 100).toFixed(0) + "%)";
+    const bar = $("budget-bar");
+    bar.style.width = Math.min(100, b.pct_used * 100) + "%";
+    bar.classList.remove("warn", "crit");
+    if (b.pct_used >= 0.66) bar.classList.add("crit");
+    else if (b.pct_used >= 0.33) bar.classList.add("warn");
+  }
+
+  const cd = await J("/api/dashboard/conf_distribution");
+  if (cd) {
+    $("conf-above").textContent = cd.above_floor + " / " + cd.total_seen + " above " + (cd.floor || 0.60).toFixed(2);
+    $("conf-sub").textContent = cd.above_floor === 0 ? "engine quiet — model sees nothing convincing" : "trades may fire";
+    renderConfHist(cd);
+  }
 }
 
-async function loadUsStocks() {
-  try {
-    const data=await fetch(`${API}/api/market/us/stocks`).then(r=>r.json());
-    if (data&&data.length){_usStocksData=data;renderUsStocksGrid(data);renderTicker();}
-  } catch(e){}
+function renderConfHist(cd) {
+  const hist = $("conf-hist");
+  hist.innerHTML = "";
+  const max = Math.max(1, ...cd.buckets.map(b => b.count));
+  cd.buckets.forEach((b, i) => {
+    const div = document.createElement("div");
+    div.className = "hist-bar" + (i >= 6 ? " above" : "");
+    div.style.height = Math.max(2, (b.count / max) * 70) + "px";
+    div.title = b.range + " — " + b.count + " stock(s)";
+    hist.appendChild(div);
+  });
+  $("cd-conf-sub").textContent = cd.total_seen + " stock(s) logged this tick";
 }
 
-function renderSentiment() {
-  // Compute from current _indicesData. NSE/BSE core indices drive sentiment.
-  const CORE = ['NIFTY 50', 'SENSEX', 'BANK NIFTY'];
-  const core = _indicesData.filter(i => CORE.includes(i.name));
-  if (!core.length) return;
-  const avgPct = core.reduce((s, i) => s + (i.change_pct || 0), 0) / core.length;
-  const vix = _indicesData.find(i => i.name === 'INDIA VIX');
-  const vixPct = vix ? vix.change_pct : 0;
+// ── Portfolio ──
+async function refreshPortfolio() {
+  const p = await J("/api/portfolio");
+  if (!p) return;
+  $("m-total").textContent = "₹" + fmt(p.total_value);
+  $("m-total-sub").textContent = "init ₹" + fmt(p.initial_cash);
+  $("m-cash").textContent = "₹" + fmt(p.cash);
+  $("m-cash-sub").textContent = "open eq ₹" + fmt(p.total_value - p.cash);
+  const pnl = p.total_pnl || 0;
+  $("m-pnl").textContent = "₹" + fmtSigned(pnl);
+  $("m-pnl").className = "metric-val " + colorOf(pnl);
+  const initCash = p.initial_cash || 1;
+  $("m-pnl-sub").textContent = ((pnl / initCash) * 100).toFixed(2) + "%";
+  $("m-wr").textContent = fmtPct(p.win_rate, 1);
+  $("m-wr-sub").textContent = p.n_trades + " trades total";
+  $("m-dd").textContent = fmtPct(p.drawdown_pct, 2);
+  $("m-dd-sub").textContent = "peak ₹" + fmt(p.peak_value);
+  $("m-open").textContent = (p.open_positions || []).length;
+  $("m-open-sub").textContent = "of max 5";
+}
 
-  let verdict, color, note;
-  if (avgPct > 0.002) {            // > 0.2%
-    verdict = '🟢 BULLISH'; color = 'var(--green)';
-    note = vixPct < 0 ? 'VIX falling — confident rally' : 'VIX rising — cautious uptick';
-  } else if (avgPct < -0.002) {    // < -0.2%
-    verdict = '🔴 BEARISH'; color = 'var(--red)';
-    note = vixPct > 0 ? 'VIX rising — fear-driven selloff' : 'VIX falling — orderly decline';
+// ── Cooldown ──
+async function refreshCooldowns() {
+  const cd = await J("/api/dashboard/cooldowns");
+  const list = $("cd-list");
+  const count = $("cd-count");
+  if (!cd || cd.error) { list.innerHTML = '<div class="empty">cooldown read failed</div>'; return; }
+  count.textContent = cd.n_cooled + " symbol(s)";
+  if (cd.n_cooled === 0) {
+    list.innerHTML = '<div class="empty">No active cooldowns. Engine free to enter any symbol.</div>';
   } else {
-    verdict = '⚪ FLAT'; color = 'var(--label)';
-    note = 'Market consolidating';
+    list.innerHTML = cd.symbols.map(s => '<span class="chip">' + s + '</span>').join("");
   }
-
-  const sv = document.getElementById('sentiment-verdict');
-  if (sv) { sv.textContent = verdict; sv.style.color = color; }
-  const sa = document.getElementById('sentiment-avg');
-  if (sa) {
-    sa.textContent = (avgPct >= 0 ? '+' : '') + (avgPct * 100).toFixed(2) + '%';
-    sa.style.color = avgPct >= 0 ? 'var(--green)' : 'var(--red)';
-  }
-  const sx = document.getElementById('sentiment-vix');
-  if (sx && vix) {
-    const arrow = vixPct >= 0 ? '↑' : '↓';
-    sx.textContent = `${vix.price.toFixed(2)} ${arrow} ${(Math.abs(vixPct) * 100).toFixed(2)}%`;
-    sx.style.color = vixPct >= 0 ? 'var(--red)' : 'var(--green)';
-  }
-  const sn = document.getElementById('sentiment-note');
-  if (sn) sn.textContent = note;
 }
 
-function renderTicker() {
-  const fmt2=(name,price,chg,pct,usd)=>{
-    const pos=chg>=0,cls=pos?'ticker-chg-pos':'ticker-chg-neg',arrow=pos?'▲':'▼';
-    const pf=price>1000?Number(price).toLocaleString('en-IN',{maximumFractionDigits:0}):Number(price).toFixed(2);
-    return `<div class="ticker-item"><span class="ticker-name">${name}</span><span class="ticker-price">${usd?'$':''}${pf}</span><span class="${cls}">${arrow} ${Math.abs(chg).toFixed(price>100?0:2)} (${(Math.abs(pct)*100).toFixed(2)}%)</span></div>`;
-  };
-  // NSE + BSE only — keep these names (matches api/routes/market.py INDICES dict)
-  const NSE_BSE = new Set(['NIFTY 50', 'SENSEX', 'BANK NIFTY', 'NIFTY IT', 'INDIA VIX']);
-  const items = _indicesData
-    .filter(i => NSE_BSE.has(i.name))
-    .map(i => fmt2(i.name, i.price, i.change, i.change_pct, false));
-  if (!items.length) return;
-  // Static — no duplication needed (animation removed)
-  document.getElementById('ticker-track').innerHTML = items.join('');
-}
-
-function renderUsStocksGrid(stocks) {
-  const grid=document.getElementById('us-stocks-grid');
-  if (!stocks||!stocks.length){
-    grid.innerHTML='<div style="color:var(--muted);font-size:11px;padding:20px 0">No US data — check Alpaca credentials</div>';
+// ── Regime distribution ──
+async function refreshRegime() {
+  const rd = await J("/api/dashboard/regime_distribution");
+  const list = $("rd-list");
+  const count = $("rd-count");
+  if (!rd) return;
+  count.textContent = rd.total + " entries";
+  if (rd.total === 0) {
+    list.innerHTML = '<div class="empty">No regime data yet today — no open positions, no entries.</div>';
     return;
   }
-  grid.innerHTML=stocks.map(s=>{
-    const pos=s.change>=0,col=pos?'var(--green)':'var(--red)',arrow=pos?'▲':'▼';
-    const pct=(Math.abs(s.change_pct)*100).toFixed(2);
-    return `<div class="watch-card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <div style="display:flex;align-items:center;gap:6px">
-          <span class="market-tag tag-nyse" style="font-size:9px;padding:2px 6px">NYSE</span>
-          <span class="watch-sym">${s.symbol}</span>
-        </div>
-      </div>
-      <div class="watch-price" style="color:${col}">$${Number(s.price).toFixed(2)}</div>
-      <div class="watch-row"><span class="watch-key">Change</span><span class="watch-v" style="color:${col}">${arrow} $${Math.abs(s.change).toFixed(2)}</span></div>
-      <div class="watch-row"><span class="watch-key">% Move</span><span class="watch-v" style="color:${col}">${pos?'+':''}${pct}%</span></div>
+  const max = Math.max(1, ...rd.regimes.map(r => r.count));
+  const colors = { TRENDING_UP: "var(--green)", SIDEWAYS: "var(--cyan)", TRENDING_DOWN: "var(--red)", HIGH_VOL: "var(--amber)", UNKNOWN: "var(--muted)" };
+  list.innerHTML = rd.regimes.map(r => {
+    const pct = (r.count / max) * 100;
+    const col = colors[r.name] || "var(--purple)";
+    return `<div class="sector-row">
+      <div class="sector-name">${r.name}</div>
+      <div class="sector-bar-bg"><div class="sector-bar-fill" style="width:${pct}%;background:${col}"></div></div>
+      <div class="sector-val" style="color:${col}">${r.count}</div>
     </div>`;
-  }).join('');
+  }).join("");
 }
 
-// ── Signal Lookup (any symbol on demand) ─────────────────────────────────
-async function lookupSignal() {
-  const inputEl = document.getElementById('sl-symbol-input');
-  const resultEl = document.getElementById('sl-result');
-  const statusEl = document.getElementById('sl-status');
-  let sym = (inputEl.value || '').trim().toUpperCase();
-  if (!sym) { statusEl.textContent = 'Enter a symbol first.'; return; }
-  // Default to NSE if user typed bare ticker
-  if (!sym.includes('.') && !sym.includes(':')) sym = sym + '.NS';
-  inputEl.value = sym;
+// ── Sector exposure ──
+async function refreshSectors() {
+  const s = await J("/api/dashboard/sector_exposure");
+  if (!s) return;
 
-  resultEl.style.display = 'none';
-  statusEl.textContent = `Fetching signal for ${sym}…`;
-  try {
-    const r = await fetch(`${API}/api/signals/${encodeURIComponent(sym)}`);
-    if (!r.ok) {
-      statusEl.textContent = `Error ${r.status}: symbol may be invalid or yfinance is unreachable.`;
-      return;
+  // Today's P&L by sector
+  const pnlList = $("sec-pnl-list");
+  const pnlSub = $("sec-pnl-sub");
+  if (s.error) { pnlList.innerHTML = '<div class="empty">sector read failed</div>'; return; }
+  if ((s.today_closed || []).length === 0) {
+    pnlList.innerHTML = '<div class="empty">No closed trades today.</div>';
+    pnlSub.textContent = "0 sectors";
+  } else {
+    pnlSub.textContent = s.today_closed.length + " sectors";
+    const maxAbs = Math.max(1, ...s.today_closed.map(r => Math.abs(r.net_pnl)));
+    pnlList.innerHTML = s.today_closed.map(r => {
+      const pct = (Math.abs(r.net_pnl) / maxAbs) * 100;
+      const col = r.net_pnl >= 0 ? "var(--green)" : "var(--red)";
+      const sign = r.net_pnl >= 0 ? "+" : "";
+      return `<div class="sector-row" title="${r.symbols.join(', ')} — ${r.n_trades} trade(s), ${r.wins} win(s)">
+        <div class="sector-name">${r.sector}</div>
+        <div class="sector-bar-bg"><div class="sector-bar-fill" style="width:${pct}%;background:${col}"></div></div>
+        <div class="sector-val" style="color:${col}">${sign}₹${fmt(r.net_pnl)}</div>
+      </div>`;
+    }).join("");
+  }
+
+  // Open exposure
+  const openList = $("sec-open-list");
+  const openSub = $("sec-open-sub");
+  if ((s.open || []).length === 0) {
+    openList.innerHTML = '<div class="empty">Flat — no open positions.</div>';
+    openSub.textContent = "0 sectors";
+  } else {
+    openSub.textContent = s.open.length + " sectors";
+    const maxN = Math.max(1, ...s.open.map(r => r.notional));
+    openList.innerHTML = s.open.map(r => {
+      const pct = (r.notional / maxN) * 100;
+      return `<div class="sector-row" title="${r.symbols.join(', ')}">
+        <div class="sector-name">${r.sector}</div>
+        <div class="sector-bar-bg"><div class="sector-bar-fill" style="width:${pct}%;background:var(--cyan)"></div></div>
+        <div class="sector-val text-cyan">₹${fmt(r.notional)}</div>
+      </div>`;
+    }).join("");
+  }
+}
+
+// ── Open positions with MAE/MFE ──
+async function refreshOpen() {
+  const mm = await J("/api/dashboard/mae_mfe");
+  const body = $("op-body");
+  const count = $("op-count");
+  if (!mm || !mm.positions || mm.positions.length === 0) {
+    body.innerHTML = '<tr><td colspan="11" class="empty">No open positions.</td></tr>';
+    count.textContent = "0 open";
+    return;
+  }
+  // Fetch positions for regime+conf (mae_mfe doesn't include them)
+  const p = await J("/api/portfolio");
+  const posMap = {};
+  (p && p.open_positions || []).forEach(pos => posMap[pos.symbol] = pos);
+
+  count.textContent = mm.positions.length + " open";
+  body.innerHTML = mm.positions.map(r => {
+    const pos = posMap[r.symbol] || {};
+    const sector = sectorOf(r.symbol);
+    const mae = r.mae_pct;
+    const mfe = r.mfe_pct;
+    const maeCol = mae == null ? "" : (mae <= -0.5 ? "text-red" : "text-amber");
+    const mfeCol = mfe == null ? "" : (mfe >= 0.5 ? "text-green" : "text-muted");
+    return `<tr>
+      <td><b>${r.symbol}</b></td>
+      <td><span class="pill pill-muted">${sector}</span></td>
+      <td>₹${fmt(r.entry_price, 2)}</td>
+      <td class="text-red">₹${fmt(r.stop_loss, 2)}</td>
+      <td class="text-green">₹${fmt(r.target, 2)}</td>
+      <td class="${maeCol}">${mae == null ? '—' : mae.toFixed(2) + '%'}</td>
+      <td class="${mfeCol}">${mfe == null ? '—' : '+' + mfe.toFixed(2) + '%'}</td>
+      <td class="text-muted">${r.sl_distance_pct.toFixed(2)}%</td>
+      <td class="text-muted">+${r.tgt_distance_pct.toFixed(2)}%</td>
+      <td><span class="pill pill-cyan">${pos.regime || '—'}</span></td>
+      <td>${pos.confidence ? pos.confidence.toFixed(2) : '—'}</td>
+    </tr>`;
+  }).join("");
+}
+
+// Frontend-side sector lookup (mirrors backend SECTOR_MAP — close enough for display)
+function sectorOf(sym) {
+  const M = {
+    "TCS.NS":"IT","INFY.NS":"IT","WIPRO.NS":"IT","HCLTECH.NS":"IT","TECHM.NS":"IT","KPITTECH.NS":"IT","COFORGE.NS":"IT","MPHASIS.NS":"IT","PERSISTENT.NS":"IT","LTIM.NS":"IT",
+    "HDFCBANK.NS":"Banking","ICICIBANK.NS":"Banking","KOTAKBANK.NS":"Banking","AXISBANK.NS":"Banking","SBIN.NS":"Banking","INDUSINDBK.NS":"Banking","BANKBARODA.NS":"Banking","PNB.NS":"Banking","FEDERALBNK.NS":"Banking","IDFCFIRSTB.NS":"Banking","IDBI.NS":"Banking","RBLBANK.NS":"Banking","UJJIVANSFB.NS":"Banking","BANDHANBNK.NS":"Banking","AUBANK.NS":"Banking","BAJFINANCE.NS":"Banking","BAJAJFINSV.NS":"Banking","CHOLAFIN.NS":"Banking","HDFCAMC.NS":"Banking","ICICIPRULI.NS":"Banking","LICI.NS":"Banking","MFSL.NS":"Banking","SBILIFE.NS":"Banking","HDFCLIFE.NS":"Banking","POLICYBZR.NS":"Banking","PAYTM.NS":"Banking",
+    "RELIANCE.NS":"Energy","ONGC.NS":"Energy","BPCL.NS":"Energy","IOC.NS":"Energy","HINDPETRO.NS":"Energy","GAIL.NS":"Energy","PETRONET.NS":"Energy","IGL.NS":"Energy","GSPL.NS":"Energy",
+    "MARUTI.NS":"Auto","M&M.NS":"Auto","BAJAJ-AUTO.NS":"Auto","TATAMOTORS.NS":"Auto","EICHERMOT.NS":"Auto","HEROMOTOCO.NS":"Auto","TVSMOTOR.NS":"Auto","ASHOKLEY.NS":"Auto","MOTHERSON.NS":"Auto","BOSCHLTD.NS":"Auto","MRF.NS":"Auto","BALKRISIND.NS":"Auto",
+    "SUNPHARMA.NS":"Pharma","DRREDDY.NS":"Pharma","CIPLA.NS":"Pharma","DIVISLAB.NS":"Pharma","AUROPHARMA.NS":"Pharma","GLENMARK.NS":"Pharma","BIOCON.NS":"Pharma","TORNTPHARM.NS":"Pharma","LUPIN.NS":"Pharma","ZYDUSLIFE.NS":"Pharma","MANKIND.NS":"Pharma","GRANULES.NS":"Pharma","LALPATHLAB.NS":"Pharma","ALKEM.NS":"Pharma","APOLLOHOSP.NS":"Pharma",
+    "HINDUNILVR.NS":"FMCG","NESTLEIND.NS":"FMCG","BRITANNIA.NS":"FMCG","ITC.NS":"FMCG","TATACONSUM.NS":"FMCG","DABUR.NS":"FMCG","MARICO.NS":"FMCG","GODREJCP.NS":"FMCG","COLPAL.NS":"FMCG","JUBLFOOD.NS":"FMCG","GODREJIND.NS":"FMCG","NYKAA.NS":"FMCG","TRENT.NS":"FMCG","TITAN.NS":"FMCG","ASIANPAINT.NS":"FMCG","BERGEPAINT.NS":"FMCG","PIDILITIND.NS":"FMCG","DMART.NS":"FMCG","TTKPRESTIG.NS":"FMCG",
+    "TATASTEEL.NS":"Metals","HINDALCO.NS":"Metals","JSWSTEEL.NS":"Metals","SAIL.NS":"Metals","VEDL.NS":"Metals","NMDC.NS":"Metals","COALINDIA.NS":"Metals","JINDALSTEL.NS":"Metals","WELCORP.NS":"Metals",
+    "BHARTIARTL.NS":"Telecom","IDEA.NS":"Telecom","TATACOMM.NS":"Telecom","INDIAMART.NS":"Telecom","NAUKRI.NS":"Telecom","ZEEL.NS":"Telecom",
+    "LT.NS":"Infra","ULTRACEMCO.NS":"Infra","GRASIM.NS":"Infra","AMBUJACEM.NS":"Infra","ACC.NS":"Infra","SHREECEM.NS":"Infra","DLF.NS":"Infra","GODREJPROP.NS":"Infra","OBEROIRLTY.NS":"Infra","IBREALEST.NS":"Infra","ASTRAL.NS":"Infra","POLYCAB.NS":"Infra","DIXON.NS":"Infra","BHEL.NS":"Infra","SIEMENS.NS":"Infra","HAVELLS.NS":"Infra","VOLTAS.NS":"Infra","ABB.NS":"Infra","CUMMINSIND.NS":"Infra","PEL.NS":"Infra",
+    "NTPC.NS":"Power","POWERGRID.NS":"Power","TATAPOWER.NS":"Power","ADANIPOWER.NS":"Power","ADANIGREEN.NS":"Power","ADANIENT.NS":"Power","ADANIPORTS.NS":"Power","ADANIENSOL.NS":"Power","JSWENERGY.NS":"Power","CESC.NS":"Power","TORNTPOWER.NS":"Power","RAIN.NS":"Power",
+    "UPL.NS":"Chemicals","PIIND.NS":"Chemicals","SRF.NS":"Chemicals","AARTIIND.NS":"Chemicals","DEEPAKNTR.NS":"Chemicals","TATACHEM.NS":"Chemicals","CHAMBLFERT.NS":"Chemicals","COROMANDEL.NS":"Chemicals",
+  };
+  return M[sym] || "Other";
+}
+
+// ── Trades with R-multiple ──
+async function refreshTrades() {
+  const trades = await J("/api/portfolio/trades?limit=15");
+  const body = $("tr-body");
+  const count = $("tr-count");
+  if (!trades || trades.length === 0) {
+    body.innerHTML = '<tr><td colspan="8" class="empty">No trades.</td></tr>';
+    count.textContent = "0 trades";
+    return;
+  }
+  // R-multiple approximation: return_pct / 0.01 (since strategy sizes to ~1% risk per trade)
+  count.textContent = trades.length + " recent";
+  body.innerHTML = trades.map(t => {
+    const ret = t.return_pct || 0;
+    const r = ret / 0.01;
+    const rCol = r >= 1 ? "text-green" : r <= -0.8 ? "text-red" : "text-amber";
+    const t_str = (t.exit_time || "").slice(5, 16).replace("T", " ");
+    const reasonPill = t.exit_reason === "target" ? "pill-green"
+                    : t.exit_reason === "stop_loss" ? "pill-red"
+                    : t.exit_reason === "force_close" ? "pill-amber" : "pill-muted";
+    return `<tr>
+      <td>${t_str}</td>
+      <td><b>${t.symbol}</b></td>
+      <td><span class="pill pill-muted">${sectorOf(t.symbol)}</span></td>
+      <td><span class="pill ${reasonPill}">${t.exit_reason || '—'}</span></td>
+      <td class="${ret>=0?'text-green':'text-red'}">${(ret*100).toFixed(2)}%</td>
+      <td class="${rCol}"><b>${r >= 0 ? '+' : ''}${r.toFixed(2)}R</b></td>
+      <td class="${(t.net_pnl||0)>=0?'text-green':'text-red'}">₹${fmtSigned(t.net_pnl)}</td>
+      <td class="text-muted">${t.confidence ? t.confidence.toFixed(2) : '—'}</td>
+    </tr>`;
+  }).join("");
+}
+
+// ── Equity curve ──
+async function refreshEquity() {
+  const eq = await J("/api/portfolio/equity");
+  if (!eq || eq.length === 0) {
+    $("eq-sub").textContent = "no data";
+    return;
+  }
+  // Daily aggregation — last value per date
+  const daily = {};
+  eq.forEach(r => {
+    const d = (r.timestamp || "").slice(0, 10);
+    daily[d] = r.total_value;
+  });
+  const dates = Object.keys(daily).sort();
+  const values = dates.map(d => daily[d]);
+  $("eq-sub").textContent = dates.length + " session(s)";
+  const ctx = $("equity-chart").getContext("2d");
+  if (equityChart) equityChart.destroy();
+  equityChart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: dates,
+      datasets: [{
+        label: "Total Value",
+        data: values,
+        borderColor: "#38bdf8",
+        backgroundColor: "rgba(56,189,248,0.1)",
+        fill: true,
+        tension: 0.25,
+        pointRadius: 2,
+        pointHoverRadius: 5,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: "#64748b", font: { size: 10 } }, grid: { color: "rgba(100,116,139,0.1)" } },
+        y: { ticks: { color: "#64748b", font: { size: 10 }, callback: v => "₹" + (v/1000).toFixed(0) + "k" }, grid: { color: "rgba(100,116,139,0.1)" } },
+      },
+    },
+  });
+}
+
+// ── Market sentiment ──
+async function refreshSentiment() {
+  const idx = await J("/api/market/indices");
+  if (!idx || !idx.length) { $("sentiment-verdict").textContent = "—"; return; }
+  const core = idx.filter(i => !["INDIA VIX", "S&P 500", "NASDAQ", "DOW JONES"].includes(i.name));
+  const avg = core.reduce((a, b) => a + b.change_pct, 0) / Math.max(1, core.length);
+  const vix = idx.find(i => i.name === "INDIA VIX");
+  let verdict, col;
+  if (avg > 0.005) { verdict = "BULLISH"; col = "var(--green)"; }
+  else if (avg > 0.002) { verdict = "MILD UP"; col = "var(--cyan)"; }
+  else if (avg < -0.005) { verdict = "BEARISH"; col = "var(--red)"; }
+  else if (avg < -0.002) { verdict = "MILD DOWN"; col = "var(--amber)"; }
+  else { verdict = "FLAT"; col = "var(--muted)"; }
+  const v = $("sentiment-verdict");
+  v.textContent = verdict;
+  v.style.color = col;
+  $("sentiment-avg").textContent = (avg >= 0 ? "+" : "") + (avg * 100).toFixed(2) + "%";
+  $("sentiment-avg").style.color = avg >= 0 ? "var(--green)" : "var(--red)";
+  if (vix) {
+    $("sentiment-vix").textContent = vix.price.toFixed(2) + " (" + (vix.change_pct >= 0 ? "+" : "") + (vix.change_pct * 100).toFixed(2) + "%)";
+    $("sentiment-vix").style.color = vix.change_pct >= 0 ? "var(--amber)" : "var(--green)";
+  }
+  $("sentiment-note").textContent = core.length + " indices · avg of NIFTY/SENSEX/BANK/IT";
+}
+
+// ── Engine / market / latency footer ──
+async function refreshFooter() {
+  const fc = await J("/api/dashboard/force_close");
+  $("mkt-state").textContent = fc && !fc.is_weekend && !fc.is_past ? "OPEN" : (fc && fc.is_weekend ? "WEEKEND" : "CLOSED");
+  $("mkt-state").className = "metric-val " + (fc && !fc.is_weekend && !fc.is_past ? "text-green" : "text-muted");
+  $("mkt-sub").textContent = fc ? fc.label : "—";
+
+  const lat = await J("/api/dashboard/signal_latency");
+  if (lat) {
+    if (lat.status === "all-under-gate") {
+      $("lat-state").textContent = "✓ OK";
+      $("lat-state").className = "metric-val text-green";
+      $("lat-sub").textContent = "0 breaches today";
+    } else {
+      $("lat-state").textContent = lat.n_breaches + " over gate";
+      $("lat-state").className = "metric-val text-amber";
+      $("lat-sub").textContent = "max " + lat.max_sec + "s";
     }
-    const s = await r.json();
-    const sig = (s.signal || 'HOLD').toUpperCase();
-    const colorMap = { BUY: 'var(--green)', SELL: 'var(--red)', HOLD: 'var(--label)' };
-    const emojiMap = { BUY: '🟢', SELL: '🔴', HOLD: '⚪' };
-    const col = colorMap[sig] || 'var(--label)';
-    const emoji = emojiMap[sig] || '⚪';
-    const conf = ((s.confidence ?? 0) * 100).toFixed(1);
-    const price = Number(s.price ?? 0).toFixed(2);
-    const sl = Number(s.stop_loss ?? 0).toFixed(2);
-    const tp = Number(s.target ?? 0).toFixed(2);
-    const rr = Number(s.risk_reward ?? 0).toFixed(1);
-    const regime = s.regime || '—';
-    const shares = s.shares ?? 0;
-    const reasons = (s.reasons || []).slice(0, 4).map(x => `• ${x}`).join('<br>');
-    const ts = s.timestamp ? new Date(s.timestamp).toLocaleString() : '—';
-
-    resultEl.innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border)">
-        <div>
-          <div style="font-size:11px;color:var(--label);letter-spacing:1px">${s.symbol || sym}</div>
-          <div style="font-size:22px;font-weight:700;color:${col};letter-spacing:1px">${emoji} ${sig}</div>
-        </div>
-        <div style="text-align:right">
-          <div style="font-size:11px;color:var(--label)">CONFIDENCE</div>
-          <div style="font-size:22px;font-weight:700;color:${col}">${conf}%</div>
-        </div>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px 16px;margin-bottom:10px">
-        <div><span style="color:var(--label)">Price:</span> <b>₹${price}</b></div>
-        <div><span style="color:var(--label)">Stop-Loss:</span> <b style="color:var(--red)">₹${sl}</b></div>
-        <div><span style="color:var(--label)">Target:</span> <b style="color:var(--green)">₹${tp}</b></div>
-        <div><span style="color:var(--label)">R:R:</span> <b>${rr}x</b></div>
-        <div><span style="color:var(--label)">Regime:</span> <b>${regime}</b></div>
-        <div><span style="color:var(--label)">Shares:</span> <b>${shares}</b></div>
-      </div>
-      ${reasons ? `<div style="color:var(--muted);font-size:11px;line-height:1.6">${reasons}</div>` : ''}
-      <div style="margin-top:8px;font-size:10px;color:var(--muted);font-style:italic">As of ${ts}</div>
-    `;
-    resultEl.style.display = 'block';
-    statusEl.textContent = '';
-  } catch (e) {
-    statusEl.textContent = `Network error: ${e.message}`;
   }
+
+  // Engine alive heuristic: log file modified in last 10 min during market hours, else show "off"
+  const eng = $("eng-state");
+  if (fc && !fc.is_weekend && !fc.is_past) {
+    eng.textContent = "RUNNING";
+    eng.className = "metric-val text-green";
+    $("eng-sub").textContent = "auto-mgd via Task Scheduler";
+  } else {
+    eng.textContent = "OFF";
+    eng.className = "metric-val text-muted";
+    $("eng-sub").textContent = "waits for 09:10 IST boot";
+  }
+
+  const now = new Date();
+  $("refresh-state").textContent = now.toTimeString().slice(0, 8);
+  $("conn-dot").className = "dot dot-green";
 }
 
-// ── Init ──────────────────────────────────────────────────────────────────
+// ── Master refresh ──
 async function refreshAll() {
-  // loadEquity reads _allTrades populated by loadTrades, so trades must finish first
-  await Promise.all([loadPortfolio(), loadTrades()]);
-  await loadEquity();
-  await renderWatchlist();
+  $("conn-dot").className = "dot dot-amber";
+  await Promise.all([
+    refreshStrip(),
+    refreshPortfolio(),
+    refreshCooldowns(),
+    refreshRegime(),
+    refreshSectors(),
+    refreshOpen(),
+    refreshTrades(),
+    refreshEquity(),
+    refreshSentiment(),
+    refreshFooter(),
+  ]);
 }
+
+// ── Boot ──
 refreshAll();
-loadIndices();
-// loadUsStocks();  // disabled — NSE/BSE only
-setInterval(refreshAll, 5*60*1000);
-setInterval(loadIndices, 60*1000);
-// setInterval(loadUsStocks, 60*1000);  // disabled
-
-// ─────────────────────────────────────────────────────────────────────────
-// ── TABS + SYSTEM HEALTH ────────────────────────────────────────────────
-// ─────────────────────────────────────────────────────────────────────────
-function switchTab(name) {
-  document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  const panel = document.getElementById('tab-' + name);
-  if (panel) panel.style.display = 'flex';
-  const btn = document.querySelector(`.tab-btn[data-tab="${name}"]`);
-  if (btn) btn.classList.add('active');
-  if (name === 'health') loadHealth();
-}
-
-function fmtAge(sec) {
-  if (sec == null) return '—';
-  if (sec < 60) return Math.round(sec) + 's ago';
-  if (sec < 3600) return Math.round(sec/60) + 'm ago';
-  return (sec/3600).toFixed(1) + 'h ago';
-}
-
-function kv(label, value, cls, tip) {
-  const t = tip ? ` title="${escapeHtml(tip)}"` : '';
-  return `<div class="k"${t}>${label}</div><div class="v ${cls||''}"${t}>${value}</div>`;
-}
-
-function pill(text, cls) {
-  return `<span class="h-pill ${cls}">${text}</span>`;
-}
-
-async function loadHealth() {
-  try {
-    const h = await fetch(`${API}/api/health/full`).then(r => r.json());
-
-    // ── Top cards ──
-    const eng = h.services.intraday;
-    const engOk = eng.active === 'active';
-    document.getElementById('h-engine-val').innerHTML = pill(eng.active.toUpperCase(), engOk?'good':'bad');
-    document.getElementById('h-engine-val').className = 'metric-val';
-    document.getElementById('h-engine-sub').textContent =
-      `PID ${eng.pid||'-'} · ${eng.memory_mb||0} MB · ${eng.restarts} restarts`;
-
-    const hb = h.heartbeat;
-    const hbCls = hb.status === 'fresh' ? 'good' : hb.status === 'stale' ? 'warn' : 'bad';
-    document.getElementById('h-heartbeat-val').innerHTML = pill(hb.status.toUpperCase(), hbCls);
-    document.getElementById('h-heartbeat-sub').textContent =
-      hb.exists ? `${fmtAge(hb.age_seconds)}` : 'no heartbeat file';
-
-    const memPct = h.vps.mem_used_pct;
-    const memCls = memPct < 70 ? 'good' : memPct < 85 ? 'warn' : 'bad';
-    document.getElementById('h-mem-val').innerHTML =
-      `<span class="${memCls === 'good' ? 'text-green' : memCls === 'warn' ? 'text-amber' : 'text-red'}">${memPct}%</span>`;
-    document.getElementById('h-mem-sub').textContent =
-      `${h.vps.mem_used_mb}/${h.vps.mem_total_mb} MB · swap ${h.vps.swap_used_mb||0} MB`;
-
-    const mk = h.market;
-    document.getElementById('h-market-val').innerHTML =
-      pill(mk.is_open ? 'OPEN' : 'CLOSED', mk.is_open ? 'good' : 'warn');
-    document.getElementById('h-market-sub').textContent = `${mk.weekday} · ${mk.now_ist.split(' ')[1]} IST`;
-
-    // ── Intraday systemd detail ──
-    const intDet = document.getElementById('h-intraday-detail');
-    intDet.innerHTML =
-      kv('Active', eng.active, engOk?'good':'bad',
-         'Is the engine running right now? "active" = yes, anything else = no.') +
-      kv('Enabled', eng.enabled, '',
-         'Will the engine start automatically? "disabled" is OK here because a timer starts it at 9:10 AM IST.') +
-      kv('Memory', `${eng.memory_mb} MB`, '',
-         'How much RAM the engine is using. Maximum allowed is 700 MB — if it goes over, the engine is killed and restarted.') +
-      kv('PID', eng.pid || '—', '',
-         'Process ID — like a badge number for the engine on the server. Changes after every restart.') +
-      kv('Restarts', eng.restarts, eng.restarts > 3 ? 'warn' : 'good',
-         'How many times the engine crashed and restarted itself today. 0 is best. More than 3 means something is wrong.') +
-      kv('Last result', eng.last_result || '—', '',
-         'How the engine last finished. "success" = clean stop. Anything else = crash.') +
-      kv('Started', (eng.started_at || '—').slice(0, 28), '',
-         'When the engine was last started.');
-
-    const dash = h.services.dashboard;
-    const dashOk = dash.active === 'active';
-    document.getElementById('h-dashboard-detail').innerHTML =
-      kv('Active', dash.active, dashOk?'good':'bad',
-         'Is the dashboard server running? If "active" you can see this page. Otherwise the page would not load.') +
-      kv('Enabled', dash.enabled, '',
-         'Does the dashboard auto-start when the server reboots? Should be "enabled".') +
-      kv('Memory', `${dash.memory_mb} MB`, '',
-         'How much RAM the dashboard uses. Maximum allowed is 300 MB.') +
-      kv('PID', dash.pid || '—', '',
-         'Process ID — the dashboard\'s badge number on the server.') +
-      kv('Restarts', dash.restarts, dash.restarts > 3 ? 'warn' : 'good',
-         'How many times the dashboard crashed today. 0 is best.') +
-      kv('Started', (dash.started_at || '—').slice(0, 28), '',
-         'When the dashboard last started.');
-
-    // ── VPS vitals ──
-    const v = h.vps;
-    document.getElementById('h-vps-detail').innerHTML =
-      kv('Hostname', v.hostname, '',
-         'The name of the cloud server.') +
-      kv('Uptime', (v.uptime_hours || 0).toFixed(1) + ' hours', '',
-         'How long since the server was last rebooted. Higher is better — restarts are bad.') +
-      kv('Load 1/5/15', `${v.load_1m||0} / ${v.load_5m||0} / ${v.load_15m||0}`, '',
-         'How busy the server is, averaged over the last 1, 5, and 15 minutes. Below 1.0 per CPU core is healthy.') +
-      kv('RAM used', `${v.mem_used_mb}/${v.mem_total_mb} MB (${v.mem_used_pct}%)`,
-         memCls,
-         'Memory used right now out of total memory. The server has only about 950 MB total — quite small.') +
-      kv('RAM available', `${v.mem_available_mb} MB`, '',
-         'Memory still free for new things. Below 100 MB is risky.') +
-      kv('Swap', `${v.swap_used_mb||0}/${v.swap_total_mb||0} MB`, '',
-         'Backup memory stored on disk (very slow). Should stay close to 0. If high, the engine slows down a lot.') +
-      kv('Disk free', `${v.disk_free_gb}/${v.disk_total_gb} GB (${(100-v.disk_used_pct).toFixed(1)}% free)`,
-         v.disk_used_pct > 85 ? 'warn' : 'good',
-         'Storage space remaining on the server. Keep at least 2 GB free or the engine will fail to write logs and data.');
-
-    // ── Pipeline ──
-    const log = h.log;
-    const lat = log.latency_samples || {};
-    document.getElementById('h-pipeline-detail').innerHTML =
-      kv('Universe size', log.universe_size || '—', '',
-         'How many stocks the engine is watching today (picked from the broader market each morning).') +
-      kv('Opens today', log.today_opens, '',
-         'Number of new positions the engine opened (bought) today.') +
-      kv('Closes today', log.today_closes, '',
-         'Total number of positions the engine closed (sold) today.') +
-      kv('SL hits', log.today_sl_hits, log.today_sl_hits > 5 ? 'warn' : '',
-         'How many positions closed at stop-loss (a small planned loss). Many SL hits in one day means market is choppy or signals are weak.') +
-      kv('Target hits', log.today_target_hits, log.today_target_hits > 0 ? 'good' : '',
-         'How many positions hit profit target (a win!). More is better.') +
-      kv('Force closes', log.today_force_closes, '',
-         'Positions closed automatically at 3:15 PM because the market is about to close. Used to avoid holding overnight.') +
-      (lat.n ? (
-        kv('Latency samples', lat.n, '',
-           'How many signal-generation timings we measured today. More samples = more confidence in the numbers below.') +
-        kv('Latency avg', lat.avg_sec + 's', lat.avg_sec > 5 ? 'warn' : 'good',
-           'Average time the engine takes to decide on one signal. Goal is under 1 second. If high, engine is overloaded.') +
-        kv('Latency p95', lat.p95_sec + 's', lat.p95_sec > 10 ? 'bad' : lat.p95_sec > 5 ? 'warn' : 'good',
-           '95% of signals are computed faster than this. If this is high, the engine occasionally misses the chance to act.') +
-        kv('Latency max', lat.max_sec + 's', '',
-           'The slowest single signal today. A few slow ones are OK if average is fine.') +
-        kv('Over 1s gate', lat.over_1s, lat.over_1s > 10 ? 'warn' : '',
-           'How many signals took longer than the 1-second target. Some are normal; many means the server needs more power.')
-      ) : '') +
-      kv('Log size', `${log.size_kb} KB`, '',
-         'How big the engine\'s log file is right now. Grows during the day — gets reset/rotated automatically.');
-
-    // ── Errors + Warnings ──
-    const errs = log.errors_recent || [];
-    document.getElementById('h-err-count').textContent = errs.length;
-    document.getElementById('h-errors').innerHTML = errs.length
-      ? errs.map(e => `<div class="log-line err">${escapeHtml(e)}</div>`).join('')
-      : '<div style="color:var(--muted);font-size:11px">none</div>';
-
-    const warns = log.warnings_recent || [];
-    document.getElementById('h-warn-count').textContent = warns.length;
-    document.getElementById('h-warnings').innerHTML = warns.length
-      ? warns.map(w => `<div class="log-line warn">${escapeHtml(w)}</div>`).join('')
-      : '<div style="color:var(--muted);font-size:11px">none</div>';
-
-    document.getElementById('h-last-refresh').textContent =
-      new Date(h.ts).toLocaleTimeString();
-
-    // Trigger badge on the tab if unhealthy
-    const unhealthy = !engOk || hb.status === 'dead' || memPct > 90;
-    document.getElementById('health-badge').style.display = unhealthy ? 'flex' : 'none';
-
-  } catch (e) {
-    console.error('health load failed', e);
-    document.getElementById('h-engine-val').innerHTML =
-      `<span class="text-red">FETCH FAILED</span>`;
-    document.getElementById('h-engine-sub').textContent = String(e).slice(0, 80);
-  }
-}
-
-function escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
-}
-
-// Poll health every 10 sec when the health tab is active; lightweight background poll every 60s for badge
-setInterval(() => {
-  const healthVisible = document.getElementById('tab-health').style.display !== 'none';
-  if (healthVisible) loadHealth();
-}, 10 * 1000);
-
-setInterval(() => {
-  // Lightweight background check just for the badge — once a minute
-  if (document.getElementById('tab-health').style.display === 'none') {
-    fetch(`${API}/api/health/full`).then(r => r.json()).then(h => {
-      const eng = h.services.intraday;
-      const hb = h.heartbeat;
-      const memPct = h.vps.mem_used_pct;
-      const unhealthy = eng.active !== 'active' || hb.status === 'dead' || memPct > 90;
-      document.getElementById('health-badge').style.display = unhealthy ? 'flex' : 'none';
-    }).catch(() => {});
-  }
-}, 60 * 1000);
+setInterval(refreshAll, 30000);   // every 30s
+setInterval(refreshStrip, 5000);  // strip more often — countdown + budget
 </script>
 </body>
 </html>
