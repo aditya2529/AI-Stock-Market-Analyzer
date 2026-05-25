@@ -2133,6 +2133,83 @@ May 25, 13:20 IST. Reproducible from `paper_trades` table in
 
 ---
 
+## P47. P40 phantom credit RECURRED — root cause never identified (HIGH)
+
+**Status:** SYMPTOM HOT-PATCHED post-market on Sun May 25, ~19:25 IST
+(DB-only correction, same pattern as P40's May 21 fix). Pre-fix backup
+saved as `market_data_pre_p40_20260525_192409.db`. Root cause for the
+RECURRENCE remains unknown.
+
+**Symptom:** Between P40's May 21 fix and May 25 EOD, the NSE cash bucket
+re-accumulated **₹88,729.65** of phantom credit. P40 had documented the
+same class of bug — ~₹79K phantom on May 21 — and was reconciled then.
+Four trading days later, ~₹88K phantom is back. **This is not a one-time
+glitch; it's a recurring bug.**
+
+**Pre-fix (May 25, 19:24 IST):**
+```
+nse_cash         = ₹576,948.36  (inflated)
+peak_value       = ₹582,574.27  (inflated)
+nse_initial_cash = ₹500,000.00  (correct)
+lifetime P&L     = -₹11,781.28  (correct, from paper_trades)
+open positions   = 0
+expected cash    = 500,000 + (-11,781.28) - 0 = ₹488,218.72
+phantom credit   = ₹88,729.65
+```
+
+**Hot-patch applied:**
+```sql
+UPDATE paper_config SET value='488218.72' WHERE key='nse_cash';
+UPDATE paper_config SET value='500000'    WHERE key='peak_value';
+```
+
+After patch:
+- cash / total_value: ₹488,218.72 ✓
+- drawdown_pct: 2.36% ✓ (was understated due to inflated peak)
+- total_pnl: -₹11,781.28 (unchanged — was always correct)
+
+**Why this is a HIGH-priority audit ask:**
+- P40 root cause was never definitively traced — Mar 21 wrote-off blamed
+  "manual force-close cleanup mid-week" as the most likely candidate
+- That hypothesis can no longer hold — the May 21–25 window had NO
+  manual cash adjustments, only normal engine-driven open/close cycles
+- ₹88K phantom over 4 sessions = roughly ~₹22K/session of drift
+- The bug is in the engine's cash-accounting path, not in the manual
+  reconciliation procedure. Audit team must find it before any real money.
+
+**Hypotheses to investigate (in priority order):**
+1. **Engine restart double-credit.** May 25 we restarted the engine 3 times
+   (P44 hot-patch). Each restart re-loads positions from `paper_positions`.
+   If the restart logic re-debits or fails to debit, cash drifts.
+2. **Force-close path.** Today had 1 force_close (ZEEL at 15:15). Earlier
+   sessions had more. The force-close branch of `close_position` may
+   credit differently than a normal SL/target close.
+3. **Watchdog-driven kill-restart cycles.** Watchdog has historically
+   restarted the engine multiple times per session. Each restart is a
+   potential window where in-flight cash math gets lost.
+4. **The cash bucket isn't atomic with the position insert.** `open_position`
+   in `paper_trading/portfolio.py` does two separate writes — INSERT into
+   paper_positions, then UPDATE paper_config nse_cash. If a crash/kill
+   happens between them, the position exists but cash wasn't debited
+   (or vice versa on close).
+5. **set_market_cash race during snapshot_portfolio.** Concurrent reads
+   between the engine tick loop and the snapshot writer could trample
+   intermediate state. Low probability but worth checking.
+
+**Suggested audit steps:**
+- Add a `cash_audit` table that logs every nse_cash change with
+  (timestamp, old_value, new_value, reason, symbol). Snapshot it every
+  tick. Patterns will surface within one session.
+- Verify `open_position` and `close_position` are wrapped in a single
+  SQLite transaction so position+cash writes commit atomically.
+- Audit `intraday/engine.py` for any code path that touches nse_cash
+  outside of `open_position` / `close_position`.
+
+**Standing rule honored:** Engine had 0 open positions and was OFF
+(market closed) when the patch was applied. Lowest-risk window.
+
+---
+
 ## P46. Dashboard ruthless redesign — trader-grade observability (MEDIUM — DONE)
 
 **Status:** SHIPPED by ops on May 25 ~16:30 IST. Single-session build,
