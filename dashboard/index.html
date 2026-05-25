@@ -125,12 +125,28 @@
     /* ── Cooldown chip ── */
     .chip{display:inline-block;padding:3px 10px;border-radius:14px;background:rgba(251,191,36,.12);color:var(--amber);border:1px solid rgba(251,191,36,.3);font-family:var(--mono);font-size:11px;margin:3px 4px 3px 0}
 
+    /* ── Indices ticker bar ── */
+    .ticker-bar{background:rgba(6,8,16,.98);border-bottom:1px solid var(--border);overflow-x:auto;overflow-y:hidden;height:34px;display:flex;align-items:center;white-space:nowrap}
+    [data-theme="light"] .ticker-bar{background:#fff}
+    .ticker-track{display:flex;gap:0}
+    .ticker-item{display:inline-flex;align-items:center;gap:8px;padding:0 18px;border-right:1px solid var(--border);font-family:var(--mono);font-size:11px;white-space:nowrap}
+    .ticker-name{color:var(--label);font-size:10px;letter-spacing:.5px}
+    .ticker-price{font-weight:700}
+    .ticker-chg-pos{color:var(--green)} .ticker-chg-neg{color:var(--red)}
+
     /* ── Footer / engine status row ── */
     .footer-row{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;padding:10px 0;border-top:1px solid var(--border);margin-top:8px}
     @media (max-width:700px){.footer-row{grid-template-columns:1fr 1fr}}
   </style>
 </head>
 <body>
+
+<!-- ─── Indices ticker (NIFTY, SENSEX, BANK NIFTY, etc.) ─── -->
+<div class="ticker-bar z1">
+  <div class="ticker-track" id="ticker-track">
+    <div class="ticker-item"><span class="ticker-name">loading indices…</span></div>
+  </div>
+</div>
 
 <!-- ─── Header ─── -->
 <header>
@@ -688,9 +704,26 @@ async function refreshEquity() {
   });
 }
 
+// ── Indices ticker (NIFTY, SENSEX, BANK NIFTY, NIFTY IT, INDIA VIX, S&P, NASDAQ, DOW) ──
+function renderTicker(idx) {
+  const track = $("ticker-track");
+  if (!idx || !idx.length) { track.innerHTML = '<div class="ticker-item"><span class="ticker-name">no index data</span></div>'; return; }
+  track.innerHTML = idx.map(i => {
+    const up = i.change_pct >= 0;
+    const arrow = up ? "▲" : "▼";
+    const col = up ? "ticker-chg-pos" : "ticker-chg-neg";
+    return `<div class="ticker-item" title="${i.symbol}">
+      <span class="ticker-name">${i.name}</span>
+      <span class="ticker-price">${i.price.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</span>
+      <span class="${col}">${arrow} ${(i.change_pct * 100).toFixed(2)}%</span>
+    </div>`;
+  }).join("");
+}
+
 // ── Market sentiment ──
 async function refreshSentiment() {
   const idx = await J("/api/market/indices");
+  renderTicker(idx);
   if (!idx || !idx.length) { $("sentiment-verdict").textContent = "—"; return; }
   const core = idx.filter(i => !["INDIA VIX", "S&P 500", "NASDAQ", "DOW JONES"].includes(i.name));
   const avg = core.reduce((a, b) => a + b.change_pct, 0) / Math.max(1, core.length);
