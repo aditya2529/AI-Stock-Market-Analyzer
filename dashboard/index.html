@@ -872,18 +872,24 @@ async function refreshEquity() {
   });
 }
 
-// ── Indices ticker (NIFTY, SENSEX, BANK NIFTY, NIFTY IT, INDIA VIX, S&P, NASDAQ, DOW) ──
+// ── Indices ticker — INDIAN ONLY, points (not %) ──
 function renderTicker(idx) {
   const track = $("ticker-track");
   if (!idx || !idx.length) { track.innerHTML = '<div class="ticker-item"><span class="ticker-name">no index data</span></div>'; return; }
-  track.innerHTML = idx.map(i => {
-    const up = i.change_pct >= 0;
+  // Indian indices only — drop S&P 500 / NASDAQ / DOW JONES
+  const INDIAN = ["NIFTY 50", "SENSEX", "BANK NIFTY", "NIFTY IT", "INDIA VIX"];
+  const filtered = idx.filter(i => INDIAN.includes(i.name));
+  if (!filtered.length) { track.innerHTML = '<div class="ticker-item"><span class="ticker-name">no Indian index data</span></div>'; return; }
+  track.innerHTML = filtered.map(i => {
+    const up = i.change >= 0;
     const arrow = up ? "▲" : "▼";
     const col = up ? "ticker-chg-pos" : "ticker-chg-neg";
-    return `<div class="ticker-item" title="${i.symbol}">
+    const sign = up ? "+" : "";
+    const ptStr = sign + i.change.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+    return `<div class="ticker-item" title="${i.symbol} · ${(i.change_pct*100).toFixed(2)}%">
       <span class="ticker-name">${i.name}</span>
       <span class="ticker-price">${i.price.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</span>
-      <span class="${col}">${arrow} ${(i.change_pct * 100).toFixed(2)}%</span>
+      <span class="${col}">${arrow} ${ptStr}</span>
     </div>`;
   }).join("");
 }
