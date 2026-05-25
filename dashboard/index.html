@@ -150,6 +150,14 @@
     .log-list{font-family:var(--mono);font-size:10px;max-height:240px;overflow-y:auto;padding:6px;background:var(--bg3);border-radius:6px;border:1px solid var(--border);line-height:1.4}
     .log-list div{padding:2px 0;border-bottom:1px dotted var(--border);word-break:break-all}
     .log-err{color:var(--red)} .log-warn{color:var(--amber)}
+
+    /* ── Pagination ── */
+    .pg-row{display:flex;align-items:center;justify-content:center;gap:6px;margin-top:10px;flex-wrap:wrap}
+    .pg-btn{background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:4px 10px;border-radius:6px;font-family:var(--mono);font-size:11px;cursor:pointer;min-width:30px;transition:all .15s}
+    .pg-btn:hover:not(:disabled){border-color:var(--cyan);color:var(--cyan)}
+    .pg-btn.active{background:var(--cyan);color:#000;border-color:var(--cyan);font-weight:700}
+    .pg-btn:disabled{opacity:.4;cursor:not-allowed}
+    .pg-size{background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:6px;font-family:var(--mono);font-size:11px;cursor:pointer}
     @media (max-width:700px){.footer-row{grid-template-columns:1fr 1fr}}
   </style>
 </head>
@@ -345,11 +353,21 @@
     </div>
   </div>
 
-  <!-- ─── Recent trades table (with R-multiple) ─── -->
-  <div class="card" title="Last 15 closed trades. R is the strategy-normalized P&L — 1.0R means a one-stop-loss-distance loss (or gain). +2.0R is a clean target hit.">
+  <!-- ─── Trades table (with R-multiple + pagination) ─── -->
+  <div class="card" title="All closed trades. R is the strategy-normalized P&L — 1.0R means a one-stop-loss-distance loss (or gain). +2.0R is a clean target hit.">
     <div class="card-header">
-      <div class="card-title">Recent Trades — R-Multiple</div>
-      <div class="card-sub" id="tr-count">—</div>
+      <div class="card-title">Trade History — R-Multiple</div>
+      <div class="card-sub" style="display:flex;align-items:center;gap:10px">
+        <span id="tr-count">—</span>
+        <span style="color:var(--muted)">·</span>
+        <span style="color:var(--label)">page size:</span>
+        <select class="pg-size" id="tr-size" onchange="setTradesSize(this.value)">
+          <option value="15">15</option>
+          <option value="50" selected>50</option>
+          <option value="100">100</option>
+          <option value="500">all</option>
+        </select>
+      </div>
     </div>
     <div class="table-wrap">
       <table>
@@ -362,6 +380,7 @@
         <tbody id="tr-body"><tr><td colspan="8" class="empty">No trades.</td></tr></tbody>
       </table>
     </div>
+    <div class="pg-row" id="tr-pagination"></div>
   </div>
 
   <!-- ─── EOD Equity Curve ─── -->
@@ -723,26 +742,57 @@ function sectorOf(sym) {
   return M[sym] || "Other";
 }
 
-// ── Trades with R-multiple ──
+// ── Trades with R-multiple + client-side pagination ──
+let _allTrades = [];
+let _tradePage = 1;
+let _tradePageSize = 50;
+
 async function refreshTrades() {
-  const trades = await J("/api/portfolio/trades?limit=15");
+  // Pull a generous chunk once — sufficient for paging through lifetime trades.
+  _allTrades = (await J("/api/portfolio/trades?limit=500")) || [];
+  renderTradesPage();
+}
+
+function setTradesSize(v) {
+  _tradePageSize = parseInt(v, 10) || 50;
+  _tradePage = 1;
+  renderTradesPage();
+}
+
+function goToTradePage(p) {
+  const totalPages = Math.max(1, Math.ceil(_allTrades.length / _tradePageSize));
+  _tradePage = Math.min(Math.max(1, p), totalPages);
+  renderTradesPage();
+}
+
+function renderTradesPage() {
   const body = $("tr-body");
   const count = $("tr-count");
-  if (!trades || trades.length === 0) {
+  const pg = $("tr-pagination");
+
+  if (!_allTrades || _allTrades.length === 0) {
     body.innerHTML = '<tr><td colspan="8" class="empty">No trades.</td></tr>';
     count.textContent = "0 trades";
+    pg.innerHTML = "";
     return;
   }
-  // R-multiple approximation: return_pct / 0.01 (since strategy sizes to ~1% risk per trade)
-  count.textContent = trades.length + " recent";
-  body.innerHTML = trades.map(t => {
+
+  const total = _allTrades.length;
+  const totalPages = Math.max(1, Math.ceil(total / _tradePageSize));
+  if (_tradePage > totalPages) _tradePage = totalPages;
+  const start = (_tradePage - 1) * _tradePageSize;
+  const slice = _allTrades.slice(start, start + _tradePageSize);
+
+  count.textContent = `${total} total · page ${_tradePage}/${totalPages} · showing ${slice.length}`;
+
+  body.innerHTML = slice.map(t => {
     const ret = t.return_pct || 0;
     const r = ret / 0.01;
     const rCol = r >= 1 ? "text-green" : r <= -0.8 ? "text-red" : "text-amber";
     const t_str = (t.exit_time || "").slice(5, 16).replace("T", " ");
     const reasonPill = t.exit_reason === "target" ? "pill-green"
                     : t.exit_reason === "stop_loss" ? "pill-red"
-                    : t.exit_reason === "force_close" ? "pill-amber" : "pill-muted";
+                    : (t.exit_reason || "").indexOf("force") >= 0 ? "pill-amber" : "pill-muted";
     return `<tr>
       <td>${t_str}</td>
       <td><b>${t.symbol}</b></td>
@@ -754,6 +804,23 @@ async function refreshTrades() {
       <td class="text-muted">${t.confidence ? t.confidence.toFixed(2) : '—'}</td>
     </tr>`;
   }).join("");
+
+  // Pagination buttons
+  if (totalPages <= 1) { pg.innerHTML = ""; return; }
+  let html = `<button class="pg-btn" onclick="goToTradePage(${_tradePage - 1})" ${_tradePage === 1 ? 'disabled' : ''}>‹ prev</button>`;
+  if (totalPages <= 8) {
+    for (let p = 1; p <= totalPages; p++)
+      html += `<button class="pg-btn${p === _tradePage ? ' active' : ''}" onclick="goToTradePage(${p})">${p}</button>`;
+  } else {
+    html += `<button class="pg-btn${1 === _tradePage ? ' active' : ''}" onclick="goToTradePage(1)">1</button>`;
+    if (_tradePage > 3) html += `<span style="color:var(--muted);font-size:11px;padding:0 4px">…</span>`;
+    for (let p = Math.max(2, _tradePage - 1); p <= Math.min(totalPages - 1, _tradePage + 1); p++)
+      html += `<button class="pg-btn${p === _tradePage ? ' active' : ''}" onclick="goToTradePage(${p})">${p}</button>`;
+    if (_tradePage < totalPages - 2) html += `<span style="color:var(--muted);font-size:11px;padding:0 4px">…</span>`;
+    html += `<button class="pg-btn${totalPages === _tradePage ? ' active' : ''}" onclick="goToTradePage(${totalPages})">${totalPages}</button>`;
+  }
+  html += `<button class="pg-btn" onclick="goToTradePage(${_tradePage + 1})" ${_tradePage === totalPages ? 'disabled' : ''}>next ›</button>`;
+  pg.innerHTML = html;
 }
 
 // ── Equity curve ──
