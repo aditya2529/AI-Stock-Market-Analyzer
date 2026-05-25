@@ -373,11 +373,11 @@
       <table>
         <thead>
           <tr>
-            <th>Time</th><th>Symbol</th><th>Sector</th><th>Reason</th>
+            <th>Time</th><th>Symbol</th><th>Sector</th><th>Regime</th><th>Reason</th>
             <th>Return %</th><th>R-Multiple</th><th>Net P&amp;L</th><th>Conf</th>
           </tr>
         </thead>
-        <tbody id="tr-body"><tr><td colspan="8" class="empty">No trades.</td></tr></tbody>
+        <tbody id="tr-body"><tr><td colspan="9" class="empty">No trades.</td></tr></tbody>
       </table>
     </div>
     <div class="pg-row" id="tr-pagination"></div>
@@ -771,7 +771,7 @@ function renderTradesPage() {
   const pg = $("tr-pagination");
 
   if (!_allTrades || _allTrades.length === 0) {
-    body.innerHTML = '<tr><td colspan="8" class="empty">No trades.</td></tr>';
+    body.innerHTML = '<tr><td colspan="9" class="empty">No trades.</td></tr>';
     count.textContent = "0 trades";
     pg.innerHTML = "";
     return;
@@ -793,10 +793,15 @@ function renderTradesPage() {
     const reasonPill = t.exit_reason === "target" ? "pill-green"
                     : t.exit_reason === "stop_loss" ? "pill-red"
                     : (t.exit_reason || "").indexOf("force") >= 0 ? "pill-amber" : "pill-muted";
+    const regimePill = t.regime === "TRENDING_UP" ? "pill-green"
+                    : t.regime === "TRENDING_DOWN" ? "pill-red"
+                    : t.regime === "HIGH_VOL" ? "pill-amber"
+                    : t.regime === "SIDEWAYS" ? "pill-cyan" : "pill-muted";
     return `<tr>
       <td>${t_str}</td>
       <td><b>${t.symbol}</b></td>
       <td><span class="pill pill-muted">${sectorOf(t.symbol)}</span></td>
+      <td><span class="pill ${regimePill}">${t.regime || '—'}</span></td>
       <td><span class="pill ${reasonPill}">${t.exit_reason || '—'}</span></td>
       <td class="${ret>=0?'text-green':'text-red'}">${(ret*100).toFixed(2)}%</td>
       <td class="${rCol}"><b>${r >= 0 ? '+' : ''}${r.toFixed(2)}R</b></td>
