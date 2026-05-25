@@ -225,13 +225,81 @@ For the moments when this playbook feels too abstract, remember these analogies:
 
 ## Order of operations at Day #5
 
-1. Read lifetime PF, WR, max DD across all 5 clean days
-2. If PF ≥ 1.5 → done, scale capital
-3. If PF < 1.5 → apply **fix #1 (trailing stop)** only. Measure 10 more trades.
-4. After 10 more trades: re-read PF. If improved → continue with fix #1, optionally add fix #3 (regime filter).
-5. If still bad → fix #2 (confidence floor) instead, measure another 10.
-6. Each fix gets its own 10-trade evaluation.
-7. **Never combine fixes during the test phase.** Combine only AFTER each is independently proven.
+**Committed path (chosen May 22, 2026): Option A — 4-week bundled rollout.**
+
+User explicitly rejected the slower one-fix-at-a-time approach because of impatience. Accepted the trade-off: bundled fixes mean we can't isolate exactly WHICH overlay produced the PF lift, but we get the answer 6× faster.
+
+### Pre-condition for kicking off
+
+- 5 clean operational days accumulated (as of May 25 EOD: counter is at **3/5** — user accepted May 25 as clean despite 3 engine restarts + 1 DB reconcile, on the grounds that all manual ops were planned, logged, user-authorized, and engine never crashed unprompted)
+- Lifetime PF read at Day-5: if ≥ 1.5 → STOP, don't apply any overlays, just scale capital
+- If lifetime PF < 1.5 → execute the 4-week sequence below
+
+### The 4-week sequence
+
+**Week 1 (~7-14 trading days):**
+Apply Tier 2.5 overlays **#5 + #4 together** (the cheapest pair):
+- **2.5.5 Same-day target cooldown** (~15 LOC, mirrors P30 pattern)
+- **2.5.4 Hard 14:00 IST entry cutoff** (~2 LOC in `_process_symbol`)
+
+Measure: 20 trades on the new code. Compute PF over those 20.
+
+**Week 2:**
+Apply Tier 2.5 overlays **#3 + #1 together** (the discipline pair):
+- **2.5.3 Headline-risk exclusion list** (~10 LOC + config list)
+- **2.5.1 Stock-quality tiering A/B/C** (~30 LOC + config lists)
+
+Measure: 20 more trades. Re-compute PF.
+
+**Week 3:**
+Apply Tier 2.5 overlay **#2 (last one)**:
+- **2.5.2 Sector momentum overlay** (~50 LOC, needs sector index data)
+
+Measure: 20 more trades. Read final PF.
+
+**Week 4 (decision week):**
+
+| Lifetime PF after all overlays | Action |
+|---|---|
+| ≥ 1.5 sustained | Strategy works. Begin Phase 3 prep (broker, live small money). |
+| 1.2-1.5 | Marginal. Continue with overlays as-is for 50 more trades. Don't add more. |
+| < 1.2 | Model has structural issue. Build ORB in parallel (Tier 4). Compare 30 trades each. |
+| < 1.0 | Strategy is genuinely losing money. Retire ML, ship ORB instead. |
+
+### What user explicitly accepted by choosing Option A
+
+- ❌ Lose the ability to attribute which specific overlay produced the lift
+- ✓ Get the verdict 6× faster (4 weeks vs theoretical 24 weeks at one-fix-per-10-trades)
+- ✓ Maintain measurement discipline across bundles (20 trades per bundle is statistically meaningful)
+- ✓ Don't combine ALL overlays at once — still 3 measurement checkpoints
+
+### Hard rules during the rollout
+
+- **NO real money during these 4 weeks.** Paper only.
+- **NO new strategy ideas** (swing, ORB) — finish this sequence first
+- **NO config changes** outside the planned overlays (MAX_RISK_PCT, INTRADAY_MAX_POSITIONS, etc. stay)
+- **NO emergency tweaks based on individual losing days** — only react to 20-trade aggregates
+- **Daily losses up to -₹15K** (P28 circuit-breaker threshold) are NORMAL during testing. Don't panic.
+
+### What ops Claude will do during these 4 weeks
+
+- Watch engine health (zero crashes is the bar)
+- Run weekly PF reports at end of each 20-trade bundle
+- File any new operational bugs (new P-items)
+- **NOT push strategy fixes** — those go through audit team
+- **NOT relitigate** Option A (re-read this section if user wants to deviate)
+
+### Why this is committed, not optional
+
+The biggest risk to this plan isn't a fix that doesn't work — it's **abandoning the plan in week 2 because of one bad week of trades**. The playbook explicitly defends against this:
+
+**If at any week the user wants to deviate (swing pivot, kill strategy, add real money, change config):**
+1. Re-read the commitment at the top of this document
+2. Re-read this Option A section
+3. Wait 24 hours before acting
+4. If still wanting to deviate after 24 hours, document the reason here as a new section before changing anything
+
+That's the discipline contract. Three months ago you didn't have this discipline. Now you do. **Use it.**
 
 ---
 
