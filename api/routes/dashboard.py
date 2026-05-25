@@ -241,40 +241,55 @@ def get_conf_distribution():
 
 @router.get("/regime_distribution")
 def get_regime_distribution():
-    """Universe-wide regime counts.
+    """Regime breakdown of today's activity.
 
-    Today's engine log doesn't currently emit per-tick regime breakdowns,
-    so this endpoint derives an approximation from the most recent OPEN
-    events and currently-open positions. If the engine starts logging
-    full regime tick summaries (future P-item), this can be upgraded.
+    Sources, in order of preference:
+      1. Currently open positions (paper_positions has regime per P35)
+      2. Today's closed trades (paper_trades has regime per P35)
+      3. Fallback: empty + note
+
+    The engine log doesn't currently emit per-tick universe-wide regime
+    counts — that's a separate future enhancement. This endpoint surfaces
+    the regime data that DOES exist (entry-time tags carried into trades).
     """
     counts: Counter = Counter()
+    sources_used = []
     try:
-        from paper_trading.portfolio import init_paper_tables, get_open_positions
+        from paper_trading.portfolio import (
+            init_paper_tables, get_open_positions, get_trade_history,
+        )
         init_paper_tables()
+
         positions = get_open_positions()
         if not positions.empty:
             for _, row in positions.iterrows():
                 regime = row.get("regime") or "UNKNOWN"
                 counts[regime] += 1
-    except Exception:
-        pass
+            sources_used.append(f"{len(positions)} open position(s)")
 
-    # Also scan today's log OPEN events for regime
-    for line in _read_tail(_today_log_path()):
-        m = _OPEN_RE.search(line)
-        if m:
-            counts[m.group("regime").upper()] += 1
+        trades = get_trade_history()
+        if not trades.empty:
+            today_ist = datetime.now(IST).date().isoformat()
+            today_trades = trades[trades["exit_time"].str.startswith(today_ist, na=False)]
+            for _, row in today_trades.iterrows():
+                regime = row.get("regime") or "UNKNOWN"
+                counts[regime] += 1
+            if not today_trades.empty:
+                sources_used.append(f"{len(today_trades)} today closed trade(s)")
+    except Exception as e:
+        return {"regimes": [], "total": 0, "error": str(e)}
 
     if not counts:
-        return {"regimes": [], "total": 0,
-                "note": "No regime data yet today (no OPEN events, no open positions)."}
+        return {
+            "regimes": [], "total": 0,
+            "note": "No regime data — no open positions and no closed trades today.",
+        }
 
     return {
         "regimes": [{"name": k, "count": v} for k, v in counts.most_common()],
         "total": sum(counts.values()),
-        "note": "Counts from today's OPEN events + currently open positions. "
-                "Not a live universe-wide snapshot — pending engine instrumentation.",
+        "note": f"Regimes from: {', '.join(sources_used)}. "
+                "Reflects model's read of market mood at each trade's entry.",
     }
 
 
