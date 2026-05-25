@@ -54,9 +54,14 @@ VALID_PROD_ENV = {
 
 
 def _write_env(tmp_path, mapping: dict) -> str:
-    """Materialise a fake .env to disk; return its path as a string."""
+    """Materialise a fake .env to disk; return its path as a string.
+
+    Values are wrapped in double-quotes so any leading/trailing whitespace
+    in the test value survives ``dotenv_values`` parsing — without quoting,
+    python-dotenv auto-strips and the whitespace contract tests can't fire.
+    """
     env_path = tmp_path / ".env"
-    lines = [f"{k}={v}" for k, v in mapping.items()]
+    lines = [f'{k}="{v}"' for k, v in mapping.items()]
     env_path.write_text("\n".join(lines), encoding="utf-8")
     return str(env_path)
 
