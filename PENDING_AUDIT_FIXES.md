@@ -2133,6 +2133,68 @@ May 25, 13:20 IST. Reproducible from `paper_trades` table in
 
 ---
 
+## P46. Dashboard ruthless redesign — trader-grade observability (MEDIUM)
+
+**Status:** OPEN — scoped May 25 13:30 IST, build starts ~15:30 IST after
+force-close. Owner: ops. All-in-one-shot build. Standing constraint:
+do not break anything currently working.
+
+**Remove (clutter / stale / duplicative):**
+- NYSE Portfolio + Cash + P&L cards (NYSE removed in P36, May 19 — ghost data)
+- VPS RAM / VPS Vitals panels (VPS paused — misleading)
+- Watchlist section (no signal scores or rank — useless as-is)
+- CHECK SIGNAL form (manual signal lookup — move to `/tools` hidden page)
+- Duplicate cash/portfolio in header pills (already in metric cards below)
+- Intraday Equity Curve chart (updates 50x/day, low signal — keep EOD only)
+
+**Keep (per user):**
+- Market Sentiment card
+
+**Add (10 items, all in one ship):**
+1. Force-close countdown — `1h 47m to 15:15 force-close` in header
+2. Daily loss budget remaining — `₹9,222 / ₹15,000 left today` bar
+3. Live confidence distribution histogram — universe-wide conf scores per tick
+4. Cooldown active list — which symbols cooled, until when (P30 state surfaced)
+5. Sector exposure / breakdown — sector concentration of today's trades + open positions
+6. Regime distribution NOW — count of TRENDING_UP / SIDEWAYS / HIGH_VOL across universe
+7. R-multiple per closed trade — `-1.0R` not `-₹1,445` (strategy normalization)
+8. MAE/MFE per open position — Max Adverse / Favorable Excursion in % terms
+9. Signal latency tracker — avg / p95 / last signal generation time
+10. Pre-trade preview — 3s warning panel when a trade is about to fire
+
+**Backend dependencies (new endpoints or extensions):**
+- `GET /api/dashboard/conf_distribution` — last tick's per-symbol conf
+- `GET /api/dashboard/regime_distribution` — current regime counts
+- `GET /api/dashboard/cooldowns` — active SL cooldown list (read paper_config)
+- `GET /api/dashboard/sector_exposure` — derived from open positions + today's trades
+- Extend `/api/portfolio` with `daily_loss_budget_used`, `daily_loss_budget_remaining`
+- Extend each open-position record with `mae_pct`, `mfe_pct` (computed from bar history)
+- Extend each closed-trade record with `r_multiple` (computed from entry, exit, SL)
+- Extend signal pipeline to emit latency telemetry; store in-memory ring buffer
+
+**Frontend:** single-page rewrite of `dashboard/index.html`, additive-only on
+the FastAPI side (new routes appended, existing routes untouched). New
+section ordering, new header strip. Mobile-responsive preserved.
+
+**Constraints (standing rules):**
+- Zero changes to `paper_trading/`, `models/`, `features/`, `signals/`,
+  `backtesting/`, `market_data.db` schema.
+- Zero changes to Task Scheduler entries.
+- Dashboard restart allowed (it's not the engine) — keep downtime < 30s.
+- All-in-one-shot build — single commit series, tested as a unit, pushed
+  only after manual smoke-test on laptop + phone.
+- Old dashboard kept as `dashboard/index_v1.html` for instant rollback.
+- New endpoints behind `/api/dashboard/*` prefix — existing `/api/portfolio`,
+  `/api/signals`, `/api/market` paths unchanged for backward compat.
+
+**Build window:** ~15:30 IST May 25 (post-close) → ~21:00 IST same day.
+Smoke test overnight. Ship to phone for Tuesday May 26 09:10 boot.
+
+**Rollback:** rename `index.html` ↔ `index_v1.html`. Comment out new
+`/api/dashboard/*` routes in `api/app.py`. Restart uvicorn. ~30s.
+
+---
+
 ## Notes for the audit team
 
 - Production today is running on the user's Windows laptop (8 GB RAM,
