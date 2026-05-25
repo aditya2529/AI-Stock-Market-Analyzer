@@ -2076,6 +2076,63 @@ likely on any day where yfinance returns duplicate 5-min stamps.
 
 ---
 
+## P45. Investigate adaptive cooldown — repeat losers vs repeat winners (MEDIUM)
+
+**Status:** OPEN — observed by ops on May 25 from per-symbol P&L analysis of
+57 lifetime trades. Proposal only, no code change.
+
+**Observation:** A handful of symbols have repeatedly lost across multiple
+re-entries. From `/api/portfolio/trades?limit=200` snapshot at 13:20 IST:
+
+| Symbol         | Trades | Wins | WR  | P&L      |
+|----------------|--------|------|-----|----------|
+| ADANIENSOL.NS  | 4      | 0    | 0%  | -₹2,975  |
+| WELCORP.NS     | 2      | 0    | 0%  | -₹2,952  |
+| MANKIND.NS     | 2      | 0    | 0%  | -₹2,297  |
+| SIEMENS.NS     | 2      | 0    | 0%  | -₹1,679  |
+| POLICYBZR.NS   | 2      | 0    | 0%  | -₹1,599  |
+
+Conversely, clear winners (worth re-entering on every fresh setup):
+
+| Symbol         | Trades | Wins | WR  | P&L      |
+|----------------|--------|------|-----|----------|
+| TECHM.NS       | 3      | 3    | 100%| +₹2,122  |
+| TATACOMM.NS    | 4      | 2    | 50% | +₹955    |
+
+Current behavior: SL cooldown (P30) is uniform — same N-hour skip after
+any SL, regardless of the stock's historical track record. Re-entries on
+ADANIENSOL, MANKIND, etc. happen days later and lose again.
+
+**Proposal (audit team to design, not prescribe):** an *adaptive* cooldown
+that increases with repeated losses on the same symbol. E.g.:
+- After 1st SL on a symbol: standard cooldown (current behavior)
+- After 2nd SL: 2× cooldown
+- After 3rd SL: 1-week skip OR raised conf threshold to 0.70+
+- After 4th SL: 2-week skip OR symbol removed from universe until manually re-allowed
+
+**Rationale, not blacklist:** the user has explicitly rejected permanent
+blacklisting — "what if they make money some other day?" is a valid
+concern. Adaptive cooldown gives losers a chance, just a slower one.
+Mirror logic for winners (lower threshold? longer position hold?) is
+out of scope for this P-item — log separately if pursued.
+
+**Estimated avoided loss:** ~₹6,000–₹8,000 across the repeat-loser
+symbols if a 2× cooldown had been in effect from day 1.
+
+**Do NOT during fix:**
+- Permanently blacklist any symbol without user approval.
+- Touch the confidence threshold (`SIGNAL_MIN_CONFIDENCE`) globally —
+  scope this to per-symbol adaptive logic only.
+- Modify the universe scan — repeat losers should still be *eligible*
+  for entry, just cooled longer.
+
+**Observation source:** ops-Claude analysis of
+`http://127.0.0.1:8000/api/portfolio/trades?limit=200` snapshot on
+May 25, 13:20 IST. Reproducible from `paper_trades` table in
+`market_data.db`.
+
+---
+
 ## Notes for the audit team
 
 - Production today is running on the user's Windows laptop (8 GB RAM,
