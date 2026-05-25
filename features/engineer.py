@@ -225,6 +225,15 @@ def _read_macro_context_uncached() -> tuple:
             return (None, None, None, None)
         nifty = nifty_df.set_index("time")["close"]
         vix = vix_df.set_index("time")["close"]
+        # P44 fix (May 25 2026): macro DB occasionally has duplicate timestamps
+        # (yfinance ingest race). Without dedup here, every downstream
+        # series.reindex(out.index) raises "cannot reindex on an axis with
+        # duplicate labels" and the symbol's feature engineering silently fails.
+        # Keep LAST occurrence (most recent close wins).
+        if nifty.index.has_duplicates:
+            nifty = nifty[~nifty.index.duplicated(keep="last")]
+        if vix.index.has_duplicates:
+            vix = vix[~vix.index.duplicated(keep="last")]
         nifty_ret = nifty.pct_change().rename("nifty_return")
         nifty_ma20 = (nifty / nifty.rolling(20).mean() - 1).rename("nifty_vs_ma20")
         vix = vix.rename("india_vix")
@@ -301,6 +310,14 @@ def engineer_features(df: pd.DataFrame, add_macro: bool = True) -> pd.DataFrame:
     if "time" in out.columns and not isinstance(out.index, pd.DatetimeIndex):
         out = out.set_index("time")
     out.index = pd.to_datetime(out.index)
+
+    # P44 fix (May 25 2026): yfinance occasionally returns duplicate 5-min timestamps.
+    # Without this guard, the macro reindex at line ~345 raises
+    # "cannot reindex on an axis with duplicate labels" and the entire symbol
+    # is silently dropped from the tick. Keep the LAST occurrence of any
+    # duplicated timestamp (most recent data wins).
+    if out.index.has_duplicates:
+        out = out[~out.index.duplicated(keep="last")]
 
     # RSI
     out["rsi"] = compute_rsi(out["close"])

@@ -2002,6 +2002,80 @@ instantly. Documented in runbook §11.
 
 ---
 
+## P44. Feature engineering silently fails on 7 symbols — "cannot reindex on an axis with duplicate labels" (MEDIUM — HOT-PATCHED LIVE)
+
+**Status:** HOT-PATCHED LIVE by ops on May 25, ~13:01 IST with explicit user
+authorization (engine had 0 open positions, restart window was unusually
+safe). Two-line dedup applied at two points in `features/engineer.py`:
+(1) `engineer_features()` after DatetimeIndex normalization,
+(2) `_read_macro_context_uncached()` after macro `set_index("time")`.
+Audit team should review and validate the fix at their next pass.
+P43 is reserved for the P42 background-subprocess fill-poll fallback.
+
+**Symptom:** Every tick, the engine logs `WARNING | <SYMBOL>.NS feature
+engineering failed: cannot reindex on an axis with duplicate labels` for
+a recurring set of stocks. These symbols are silently dropped from the
+tick's signal evaluation — model never gets to see them. BUY/SELL signals
+on these stocks would never fire today regardless of market conditions.
+
+**Affected symbols observed today (non-exhaustive — sampled from
+`logs/intraday_20260525.log`):**
+- NYKAA.NS
+- GLENMARK.NS
+- TATACOMM.NS
+- TTKPRESTIG.NS
+- LICI.NS
+- NAUKRI.NS
+- WELCORP.NS
+
+**Operational impact:**
+- 7/50 symbols (14% of the daily universe) silently excluded from every tick.
+- May explain part of the May 25 morning losses — the model's choice set was
+  artificially narrowed; if today's strongest setups were in the dropped
+  symbols, the engine instead picked weaker setups from the remaining 43.
+- Engine continues running, watchdog stays quiet — this is NOT a crash, it's
+  a hidden coverage gap.
+- GLENMARK.NS appears both in the silent-skip list AND was an open position
+  earlier in the day (entry 2322, conf 0.638). Suggests the failure is
+  intermittent / bar-specific, not symbol-specific.
+
+**Suspected root cause:**
+Pandas "cannot reindex on an axis with duplicate labels" is raised when
+`.reindex()` or alignment is called against an index that contains
+duplicate timestamps. Most likely sources, in order of likelihood:
+1. `yfinance` 5-min feed occasionally returns two rows for the same
+   `Datetime` (vendor-side dedup miss) — affects whichever symbols
+   happen to be in the duplicated window that tick.
+2. Macro merge: NIFTY/VIX bars are joined onto the symbol bars; if NIFTY
+   has a duplicate timestamp on that tick, every symbol joined against
+   it could fail — but log shows only specific symbols failing, so this
+   is less likely than (1).
+3. `features/engineer.py` doing a `.reindex()` without a prior
+   `.drop_duplicates()` or `.groupby(level=0).last()` guard.
+
+**Suggested fix (for audit team to validate):**
+- In `data/ingestion.py` or `features/engineer.py`, before any reindex /
+  align step, normalize the index:
+  ```python
+  df = df[~df.index.duplicated(keep='last')]
+  ```
+- Add a unit test that injects a duplicated timestamp and confirms the
+  feature pipeline returns a valid frame instead of raising.
+- Add an `INFO` log line counting how many duplicate timestamps were
+  dropped per tick per symbol — gives ops visibility into how often
+  vendor dedup misses.
+
+**Do NOT during fix:**
+- Change feature definitions or labels (that's audit-team-only territory
+  per the workflow contract, and unrelated to this bug).
+- Touch the paper engine loop in `paper_trading/engine.py`.
+- Modify the conf-floor (0.60) or any risk parameter.
+
+**Observation source:** `logs/intraday_20260525.log` tail, 12:29 IST. Repro
+likely on any day where yfinance returns duplicate 5-min stamps.
+
+---
+
 ## Notes for the audit team
 
 - Production today is running on the user's Windows laptop (8 GB RAM,
