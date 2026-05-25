@@ -1954,6 +1954,54 @@ Same behavior on clean data; HTTP 200 with `None` substitution on data containin
 
 ---
 
+## P42. Upstox Live Trading (Demo-Only Path)
+
+**Status:** READY FOR SIGN-OFF in commits `01d4ca2` → `bfb75e9` (8 commits).
+Awaiting ops's pre-flight checklist (`LIVE_TRADING_RUNBOOK.md` §1) before
+flipping `LIVE_TRADING=true` for any environment.
+
+**Files added (additive only, paper engine untouched):**
+- `live_trading/__init__.py`
+- `live_trading/kill_switch.py`
+- `live_trading/symbol_map.py`
+- `live_trading/live_portfolio.py`
+- `live_trading/upstox_client.py`
+- `live_trading/order_manager.py`
+- `live_trading/audit_log.py`
+- `live_trading/cli.py`
+- `data/adapters/upstox_adapter.py` (stub → implementation)
+- `.env.example`
+- `LIVE_TRADING_RUNBOOK.md`
+- `tests/test_p42_*.py` (7 files, 117 new tests)
+
+**Scope landed:**
+- `live_trading/` package: kill_switch + symbol_map + live_portfolio +
+  upstox_client + order_manager + audit_log + cli + profile-fetch safety belt
+- `data/adapters/upstox_adapter.py`: OHLCV fetch on Upstox v2
+  historical-candle endpoint (read-only, NOT wired into paper flow)
+- `main.py`: additive `live` subparser with demo/close/status actions
+- `.env.example` + `LIVE_TRADING_RUNBOOK.md` at project root
+
+**Hard caps (in `live_trading/kill_switch.py`):**
+- `MAX_LIVE_NOTIONAL = 2000` (qty × price ≤ ₹2,000, both pre- and post-fill)
+- `MAX_LIVE_POSITIONS = 1` (one open trade at a time)
+
+**Safety:**
+- `LIVE_TRADING=false` default — kill_switch raises before any Upstox call
+- `dotenv_values` re-read on every call — runtime kill, not startup
+- Manual CONFIRM gate on demo + close (exact-match "CONFIRM")
+- 5s foreground fill-status poll; `[FILL PENDING]` Telegram + runbook
+  fallback if exhausted (no background subprocess; deferred to P43 if needed)
+- Profile-fetch identity displayed in CONFIRM preview (wrong-token catch)
+
+**Sign-off gate:** pre-flight checklist in runbook §1. Set `LIVE_TRADING=true`
+only after all 6 items check out.
+
+**Rollback:** set `LIVE_TRADING=false` in `.env`. Every code path disabled
+instantly. Documented in runbook §11.
+
+---
+
 ## Notes for the audit team
 
 - Production today is running on the user's Windows laptop (8 GB RAM,
