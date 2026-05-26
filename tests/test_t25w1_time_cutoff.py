@@ -114,7 +114,9 @@ def test_cutoff_only_consulted_in_buy_open_branch():
         return -1
 
     buy_branch_idx = first_line_containing('signal == "BUY" and pos is None')
-    cutoff_idx = first_line_containing("_is_buy_cutoff_active")
+    # Match the call site (`if _is_..._active():`) — excludes the
+    # `def _is_..._active()` definition line which also contains parens.
+    cutoff_idx = first_line_containing("if _is_buy_cutoff_active()")
     return_none_idx = -1
     for i in range(buy_branch_idx + 1, len(lines)):
         if lines[i].strip() == "return None":

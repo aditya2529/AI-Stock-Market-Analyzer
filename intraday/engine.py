@@ -43,6 +43,22 @@ _sl_cooldown: set = set()   # symbols blocked for re-entry today after SL hit
 # the same symbol totalling -₹1,427 in ~10 min.
 _SL_COOLDOWN_KEY_FMT = "sl_cooldown_{date}"
 
+# T2.5W1-A — same-day target cooldown. Mirrors the P30 SL pattern so a
+# symbol that hit its target earlier in the session is blocked from
+# being re-bought the same day. Observed pattern from the lifetime
+# 66-trade ledger: model re-entered target-hit symbols intraday and
+# lost on the second try. Persisted to paper_config keyed by today's
+# local date so a watchdog-triggered restart inherits the block.
+_target_cooldown: set = set()
+_TARGET_COOLDOWN_KEY_FMT = "target_cooldown_{date}"
+
+# T2.5W1-B — hard 14:00 IST entry cutoff. No new BUY signals after
+# 14:00 IST; SELL / exit logic untouched; force-close at 15:15 IST
+# untouched. Hard-coded as a fixed experimental constant — the brief
+# explicitly forbids making this a runtime config because the clean
+# measurement window matters.
+TIME_CUTOFF_HOUR = 14
+
 
 def _load_sl_cooldown_for_today() -> set:
     """Load today's SL cooldown from paper_config — survives restarts."""
@@ -66,6 +82,43 @@ def _add_to_sl_cooldown(symbol: str) -> None:
     symbols = set(s for s in existing.split(",") if s)
     symbols.add(symbol)
     set_config(key, ",".join(sorted(symbols)))
+
+
+def _load_target_cooldown_for_today() -> set:
+    """T2.5W1-A: load today's target cooldown from paper_config —
+    survives restarts. Direct mirror of _load_sl_cooldown_for_today.
+    """
+    from paper_trading.portfolio import get_config
+    key = _TARGET_COOLDOWN_KEY_FMT.format(date=date.today().isoformat())
+    raw = get_config(key, "")
+    return set(s for s in (raw or "").split(",") if s)
+
+
+def _add_to_target_cooldown(symbol: str) -> None:
+    """T2.5W1-A: add a symbol to the target cooldown AND persist.
+
+    Direct mirror of _add_to_sl_cooldown. Updates the in-memory set
+    (hot-path lookup) and the persisted key (restart inheritance via
+    _load_target_cooldown_for_today).
+    """
+    from paper_trading.portfolio import get_config, set_config
+    _target_cooldown.add(symbol)
+    key = _TARGET_COOLDOWN_KEY_FMT.format(date=date.today().isoformat())
+    existing = get_config(key, "") or ""
+    symbols = set(s for s in existing.split(",") if s)
+    symbols.add(symbol)
+    set_config(key, ",".join(sorted(symbols)))
+
+
+def _is_buy_cutoff_active() -> bool:
+    """T2.5W1-B: True when current IST hour >= TIME_CUTOFF_HOUR (14).
+
+    Only consulted from the BUY-open branch of _process_symbol — moving
+    this guard to any earlier scope would block SELL / exit logic too,
+    which the brief explicitly forbids. The structural test in
+    tests/test_t25w1_time_cutoff.py defends that placement.
+    """
+    return datetime.now(IST).hour >= TIME_CUTOFF_HOUR
 
 
 # P28: daily safety gates — total NSE exposure cap, daily-loss circuit
@@ -246,6 +299,14 @@ def _process_symbol(symbol: str, ensemble, portfolio_value: float) -> dict | Non
             if result.get("exit_reason") == "stop_loss":
                 _add_to_sl_cooldown(symbol)
                 logger.info("SL cooldown: %s blocked for rest of session", symbol)
+            # T2.5W1-A: same-day target cooldown. Mirrors the SL block
+            # above — a target hit also makes the symbol ineligible for
+            # re-entry the rest of the day to avoid the model's
+            # observed pattern of re-buying-and-losing post-target.
+            elif result.get("exit_reason") == "target":
+                _add_to_target_cooldown(symbol)
+                logger.info("target cooldown: %s blocked for rest of session",
+                            symbol)
             from alerts.dispatcher import on_trade_closed
             on_trade_closed(result)
             result["_action"] = "closed"
@@ -320,10 +381,21 @@ def _process_symbol(symbol: str, ensemble, portfolio_value: float) -> dict | Non
         gate = _p28_daily_gate_block(symbol)
         if gate is not None:
             return gate
+        # T2.5W1-B: hard 14:00 IST cutoff for NEW BUYs. Cheapest reject
+        # — evaluated before any DB / paper_trading touch. SELL/exit
+        # logic upstream is unaffected by construction (this guard
+        # lives only inside the BUY-open branch).
+        if _is_buy_cutoff_active():
+            logger.info("%s: 14:00 cutoff active — skipping BUY", symbol)
+            return {"_action": "time_cutoff", "symbol": symbol}
         # Fix 2: block re-entry if symbol hit SL earlier today
         if symbol in _sl_cooldown:
             logger.info("%s: SL cooldown active — skipping BUY", symbol)
             return {"_action": "cooldown", "symbol": symbol}
+        # T2.5W1-A: block re-entry if symbol hit target earlier today
+        if symbol in _target_cooldown:
+            logger.info("%s: target cooldown active — skipping BUY", symbol)
+            return {"_action": "target_cooldown", "symbol": symbol}
         from paper_trading.portfolio import get_open_positions
         if len(get_open_positions()) >= INTRADAY_MAX_POSITIONS:
             logger.info("%s: max positions reached, skipping BUY", symbol)
@@ -437,6 +509,14 @@ def run_intraday_session(symbols: list[str], ensemble, portfolio_value: float = 
     if _sl_cooldown:
         logger.info("P30: rehydrated SL cooldown from paper_config — %d symbol(s): %s",
                     len(_sl_cooldown), sorted(_sl_cooldown))
+    # T2.5W1-A: same rehydrate semantics for the target cooldown — a
+    # restart mid-session must not let a target-hit symbol be re-bought.
+    _target_cooldown.clear()
+    _target_cooldown.update(_load_target_cooldown_for_today())
+    if _target_cooldown:
+        logger.info("T2.5W1-A: rehydrated target cooldown from paper_config — "
+                    "%d symbol(s): %s",
+                    len(_target_cooldown), sorted(_target_cooldown))
     if get_config("cash") is None:
         set_cash(portfolio_value)
         set_config("peak_value", portfolio_value)
@@ -558,6 +638,8 @@ def run_intraday_session(symbols: list[str], ensemble, portfolio_value: float = 
                        # P28 — three new daily safety gates
                        "exposure_capped": 0, "daily_loss_halt": 0,
                        "daily_count_capped": 0,
+                       # T2.5W1 — same-day target cooldown + 14:00 cutoff
+                       "target_cooldown": 0, "time_cutoff": 0,
                        "processed": 0, "errors": 0}
         with ThreadPoolExecutor(max_workers=8) as ex:
             futures = {ex.submit(_process_symbol, sym, ensemble, portfolio_value): sym
@@ -578,14 +660,19 @@ def run_intraday_session(symbols: list[str], ensemble, portfolio_value: float = 
 
         logger.info(
             "Tick summary: processed=%d | regime_blocked=%d | conf_blocked=%d "
-            "| cooldown=%d | max_pos=%d | sell_ignored=%d "
-            # P28: surface the three new daily safety gate counters so a
+            "| cooldown=%d | target_cooldown=%d | max_pos=%d | sell_ignored=%d "
+            # T2.5W1-B: surface the 14:00 entry cutoff counter so the
+            # ops dashboard log-parser picks it up alongside the rest.
+            "| time_cutoff=%d "
+            # P28: surface the three daily safety gate counters so a
             # blocked tick is never silent. Zero on a healthy day.
             "| exposure_capped=%d | daily_loss_halt=%d | daily_count_capped=%d "
             "| opened=%d | closed=%d%s",
             tick_counts["processed"], tick_counts["regime_blocked"],
             tick_counts["conf_blocked"], tick_counts["cooldown"],
+            tick_counts["target_cooldown"],
             tick_counts["max_pos"], tick_counts["sell_ignored_no_position"],
+            tick_counts["time_cutoff"],
             tick_counts["exposure_capped"], tick_counts["daily_loss_halt"],
             tick_counts["daily_count_capped"],
             tick_counts["opened"], tick_counts["closed"],
