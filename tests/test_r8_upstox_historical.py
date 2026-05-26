@@ -89,8 +89,12 @@ def test_get_historical_intraday_builds_v3_url_for_5m(monkeypatch):
     monkeypatch.setattr(ua.requests, "get", _capture)
 
     a = ua.UpstoxAdapter()
+    # Single-chunk window (≤ _V3_INTRADAY_CHUNK_DAYS) so the URL we
+    # capture covers the literal from/to dates — pagination is
+    # exercised separately in test_get_historical_intraday_paginates_
+    # long_date_ranges.
     a.get_historical_intraday("TCS.NS", interval_minutes=5,
-                                from_date="2026-04-01", to_date="2026-04-30")
+                                from_date="2026-04-01", to_date="2026-04-05")
 
     url = seen["url"]
     assert url is not None
@@ -100,14 +104,22 @@ def test_get_historical_intraday_builds_v3_url_for_5m(monkeypatch):
     # to_date precedes from_date in the path (Upstox quirk inherited
     # from v2 — kept consistent so existing operators don't get
     # surprised by an inverted ordering).
-    assert url.endswith("2026-04-30/2026-04-01")
+    assert url.endswith("2026-04-05/2026-04-01")
 
 
 def test_get_historical_intraday_returns_yfinance_shape_dataframe(monkeypatch):
-    """Returned DataFrame must match the schema engineer_features
-    consumes from yfinance: tz-naive DatetimeIndex named 'time',
-    columns [open, high, low, close, volume]. No open-interest column,
-    no extra columns — drops them at the adapter boundary."""
+    """Returned DataFrame must match the YFINANCE ADAPTER's return
+    contract (the de facto interface validate_and_clean +
+    upsert_ohlcv consume):
+        columns = [time, open, high, low, close, volume]
+        index   = default RangeIndex
+        time    = tz-naive Timestamp
+
+    The DB READ path (load_ohlcv) promotes `time` back to a
+    DatetimeIndex named 'time'; that's a different surface, not
+    what an adapter returns. open_interest is dropped at the
+    adapter boundary.
+    """
     from data.adapters import upstox_adapter as ua
 
     monkeypatch.setattr(ua, "_active_access_token", lambda *a, **k: "FAKE_TOKEN")
@@ -124,13 +136,15 @@ def test_get_historical_intraday_returns_yfinance_shape_dataframe(monkeypatch):
                                      to_date="2026-04-30")
 
     assert isinstance(df, pd.DataFrame)
-    assert list(df.columns) == ["open", "high", "low", "close", "volume"]
-    assert isinstance(df.index, pd.DatetimeIndex)
-    assert df.index.name == "time"
-    assert df.index.tz is None, (
-        "DB schema expects tz-naive — load_ohlcv returns tz-naive "
-        "DatetimeIndex; the adapter must strip tz before returning."
-    )
+    assert list(df.columns) == ["time", "open", "high", "low", "close", "volume"]
+    # Default RangeIndex (not DatetimeIndex) — matches yfinance_adapter.
+    assert isinstance(df.index, pd.RangeIndex), (
+        f"adapter should return default RangeIndex (yfinance contract), "
+        f"got {type(df.index).__name__}")
+    # `time` column is tz-naive datetime64.
+    assert pd.api.types.is_datetime64_any_dtype(df["time"])
+    assert df["time"].dt.tz is None, (
+        "validator + upsert_ohlcv expect tz-naive timestamps")
     assert "oi" not in df.columns
     assert "open_interest" not in df.columns
 

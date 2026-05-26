@@ -40,11 +40,13 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _DEFAULT_ENV_PATH = _PROJECT_ROOT / ".env"
 _TIMEOUT_SECONDS = 30
 
-# R8 — v3 5m chunking. Upstox v3 caps each response at ~5000 candles.
-# At 75 5-min bars/day × ~22 trading days/month = ~1650 bars/month, a
-# 30-day chunk leaves headroom for late-session bars and any non-trading
-# fillers the API returns.
-_V3_INTRADAY_CHUNK_DAYS = 30
+# R8 — v3 5m chunking. Upstox v3 rejects "Invalid date range" on
+# requests where the from/to span is too wide for the intraday unit.
+# Empirically Upstox accepts a 5-day window for the minutes unit at
+# the sandbox base URL; longer windows surface UDAPI1148. Using 5
+# days as a conservative default; for a 1-year backfill this means
+# ~73 requests per symbol, well within the 25/sec rate-limit budget.
+_V3_INTRADAY_CHUNK_DAYS = 5
 
 # Upstox historical-candle interval keys (v2, day/week/month).
 _INTERVAL_MAP = {
@@ -309,14 +311,14 @@ class UpstoxAdapter(DataAdapter):
 
         if not chunks:
             return pd.DataFrame(
-                columns=["open", "high", "low", "close", "volume"])
+                columns=["time", "open", "high", "low", "close", "volume"])
 
-        combined = pd.concat(chunks).sort_index()
+        combined = pd.concat(chunks, ignore_index=True).sort_values("time")
         # De-dup any boundary candles that fell into two chunks
         # (shouldn't happen with the inclusive math above, but cheap
-        # belt-and-suspenders — and matches P44's dedup spirit).
-        combined = combined[~combined.index.duplicated(keep="first")]
-        return combined
+        # belt-and-suspenders — matches P44's dedup spirit).
+        combined = combined.drop_duplicates(subset=["time"], keep="first")
+        return combined.reset_index(drop=True)
 
     def _fetch_v3_intraday_chunk(self, instrument_key: str,
                                     interval_minutes: int,
@@ -364,20 +366,21 @@ class UpstoxAdapter(DataAdapter):
 
         # Upstox row order: [timestamp, open, high, low, close, volume, open_interest]
         df = pd.DataFrame(candles, columns=[
-            "timestamp", "open", "high", "low", "close", "volume", "oi",
+            "time", "open", "high", "low", "close", "volume", "oi",
         ])
-        df["timestamp"] = pd.to_datetime(df["timestamp"])
-        df = df.set_index("timestamp").sort_index()
-        df = df.drop(columns=["oi"])  # open_interest unused downstream
-        df.index.name = "time"
-        # Strip tz — the DB schema (load_ohlcv) returns tz-naive
-        # DatetimeIndex, and engineer_features assumes the same.
-        if df.index.tz is not None:
-            df.index = df.index.tz_convert(None)
+        df = df.drop(columns=["oi"])   # open_interest unused downstream
+        # Match the yfinance adapter return contract: `time` is a
+        # column (not index), tz-naive, default RangeIndex. The DB
+        # WRITE path (validator + upsert_ohlcv) reads `df["time"]`
+        # by name — the DB READ path (load_ohlcv) then promotes it
+        # back to a DatetimeIndex named 'time'. Returning column-time
+        # here keeps the contract uniform across adapters.
+        df["time"] = pd.to_datetime(df["time"]).dt.tz_localize(None)
         # Coerce numeric columns — Upstox returns numbers but defensive
         # cast keeps dtype stable across pandas versions.
         for col in ("open", "high", "low", "close", "volume"):
             df[col] = pd.to_numeric(df[col], errors="coerce")
+        df = df.sort_values("time").reset_index(drop=True)
         return df
 
     def is_available(self) -> bool:
