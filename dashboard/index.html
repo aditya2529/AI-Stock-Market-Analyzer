@@ -528,10 +528,17 @@ function toggleTheme() {
 applyTheme(localStorage.getItem("theme") || "dark");
 
 // ── IST clock ──
+// Uses Intl.DateTimeFormat so the browser does the timezone math correctly
+// regardless of where the viewer's laptop/phone clock is set.
 function tickClock() {
-  const now = new Date();
-  const ist = new Date(now.getTime() + (5.5 * 3600 - now.getTimezoneOffset() * 60) * 1000);
-  $("ist-clock").textContent = ist.toISOString().substr(11, 8) + " IST";
+  const t = new Date().toLocaleTimeString("en-GB", {
+    timeZone: "Asia/Kolkata",
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  $("ist-clock").textContent = t + " IST";
 }
 setInterval(tickClock, 1000);
 tickClock();
