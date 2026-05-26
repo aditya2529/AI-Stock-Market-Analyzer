@@ -265,26 +265,41 @@ spirit of the Day-5 plan stands; only the C implementation path changes from
 
 ---
 
-**Timeline accelerated (May 26 night) — engine boots Wed May 27 with A+B early:**
+**Timeline accelerated (May 26 night) — engine boots Wed May 27 with A+B early
+AND fresh ledger from cutover-tonight:**
 
 Audit team committed A+B changes directly to master locally before ops planned
-cutover. Tomorrow's auto-boot will pick them up. User-accepted (Choice 2):
-let it run early instead of rolling back. Updated plan:
+cutover. Engine reads files from disk, so Wed auto-boot picks A+B regardless
+of remote push state. User-accepted (Choice 2): let it run early instead of
+rolling back. THEN user pushed back further (May 26 ~20:20 IST) — if A+B is
+live tomorrow anyway, why not also reset the cash bucket tonight so Wed = Day 1
+with a CLEAN ledger instead of preview-mode on an old one. Approved.
+
+Cutover executed May 26 20:20 IST. Backup at
+`market_data_pre_overlay_v1_20260526_202015.db` (183.3 MB). Archive tables:
+`paper_trades_pre_overlay_v1` (66 rows), `paper_positions_pre_overlay_v1`
+(0 rows), `paper_portfolio_log_pre_overlay_v1` (654 rows),
+`paper_config_pre_overlay_v1`. Fresh state: nse_cash Rs 500,000, peak Rs 500,000,
+all paper tables empty, 5 SL-cooldown keys wiped.
 
 | Date | What |
 |------|------|
-| Wed May 27, 09:10 IST | Engine auto-boots with A+B overlays live on OLD ledger (preview mode) |
-| Wed-Thu | A+B preview — stats still mixed into the 66-trade v1 history |
-| Thu May 28 morning | Audit team cold-boot smoke test |
-| Thu May 28 evening | Run `scripts/archive_and_reset_for_strategy_v2.py` — archive 66 trades, fresh Rs 500K |
-| Fri May 29, 09:10 IST | **Strategy v2 Day 1 OFFICIAL** — clean measurement begins |
-| ~Fri Jun 5 | After ~20 fresh-ledger trades, read v2 PF |
+| Wed May 27, 09:10 IST | **Strategy v2 Day 1 OFFICIAL** — engine boots with A+B + fresh Rs 500K ledger |
+| Thu May 28 morning | Audit team cold-boot smoke test (sanity check, no state change) |
+| ~Fri Jun 5 | After ~20 fresh-ledger trades, read v2 PF for the first time |
+| ~Mid-Jun | If v2 PF >= 1.3 → strategy works, plan capital scale. If 1.0-1.3 → Week 2 overlays. If < 1.0 → diagnose. |
 
-Clean Day #5 of the original framework is technically broken by this
-acceleration, but the practical loss is small — A+B fixes were going to ship
-anyway, and the empirical case for them (May 26 data showed B alone would
-have prevented 91% of that day's loss) is strong enough that we don't need
-another vanilla v1 day for validation.
+Clean Day #5 of the original framework is intentionally skipped — A+B is
+empirically supported (May 26 data showed B alone would have prevented 91%
+of that day's loss). Better to start fresh measurement with v2 now than
+burn 2 more days running broken v1.
+
+Rollback (if anything goes wrong tomorrow):
+  1. Kill engine PID
+  2. `copy market_data_pre_overlay_v1_20260526_202015.db market_data.db`
+  3. `git revert 98ca061 8739c11` and push
+  4. Re-launch engine via scheduled task
+  Total downtime: ~5 min.
 - Lifetime PF read at Day-5: if ≥ 1.5 → STOP, don't apply any overlays, just scale capital
 - If lifetime PF < 1.5 → execute the 4-week sequence below
 
