@@ -26,15 +26,25 @@ INDICES = {
 
 @router.get("/indices")
 def get_indices():
-    """Live index quotes — cached 60s to avoid hammering yfinance."""
+    """Live index quotes — cached 60s to avoid hammering yfinance.
+
+    Uses a 5d lookup window so that if today's bar is missing for a
+    slow-publishing index (BSE often lags NSE by 5-15 min after market
+    open), we still surface yesterday's close with an `is_stale=True` tag
+    rather than silently dropping the symbol from the response.
+    """
     global _indices_cache, _indices_ts
     if time.time() - _indices_ts < 60 and _indices_cache:
         return _indices_cache
 
     import yfinance as yf
+    from datetime import datetime, timezone, timedelta
+    IST = timezone(timedelta(hours=5, minutes=30))
+    today_ist = datetime.now(IST).date()
+
     tickers = list(INDICES.values())
     try:
-        data = yf.download(tickers, period="2d", interval="1d",
+        data = yf.download(tickers, period="5d", interval="1d",
                            progress=False, auto_adjust=True, group_by="ticker")
         result = []
         for name, sym in INDICES.items():
@@ -49,11 +59,17 @@ def get_indices():
                 prev  = float(df["Close"].iloc[-2])
                 chg   = curr - prev
                 chgPct = chg / prev
+                # Tag stale when the last bar isn't today (yfinance hasn't
+                # published today's bar yet for this index — common for BSE)
+                last_bar_date = df.index[-1].date() if hasattr(df.index[-1], "date") else None
+                is_stale = last_bar_date is not None and last_bar_date != today_ist
                 result.append({
                     "name": name, "symbol": sym,
                     "price": round(curr, 2),
                     "change": round(chg, 2),
                     "change_pct": round(chgPct, 4),
+                    "is_stale": is_stale,
+                    "last_bar_date": last_bar_date.isoformat() if last_bar_date else None,
                 })
             except Exception:
                 continue

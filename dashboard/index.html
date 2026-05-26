@@ -893,10 +893,11 @@ function renderTicker(idx) {
     const col = up ? "ticker-chg-pos" : "ticker-chg-neg";
     const sign = up ? "+" : "";
     const ptStr = sign + i.change.toLocaleString("en-IN", { maximumFractionDigits: 2 });
-    return `<div class="ticker-item" title="${i.symbol} · ${(i.change_pct*100).toFixed(2)}%">
+    const staleTag = i.is_stale ? '<span style="color:var(--amber);font-size:9px;margin-left:6px" title="Today's bar not yet published by data source — showing previous close">PREV</span>' : "";
+    return `<div class="ticker-item" title="${i.symbol} · ${(i.change_pct*100).toFixed(2)}%${i.is_stale ? ' (prev close ' + i.last_bar_date + ')' : ''}">
       <span class="ticker-name">${i.name}</span>
       <span class="ticker-price">${i.price.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</span>
-      <span class="${col}">${arrow} ${ptStr}</span>
+      <span class="${col}">${arrow} ${ptStr}</span>${staleTag}
     </div>`;
   }).join("");
 }
