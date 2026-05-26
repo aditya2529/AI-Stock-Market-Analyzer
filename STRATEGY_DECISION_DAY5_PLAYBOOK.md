@@ -262,6 +262,29 @@ Audit-team Round 7 investigation revealed:
 This is a correction to the original strategy framework, not a new pivot. The
 spirit of the Day-5 plan stands; only the C implementation path changes from
 "retrain on stale-fixed data" to "retrain on Upstox-backfilled data".
+
+---
+
+**Timeline accelerated (May 26 night) — engine boots Wed May 27 with A+B early:**
+
+Audit team committed A+B changes directly to master locally before ops planned
+cutover. Tomorrow's auto-boot will pick them up. User-accepted (Choice 2):
+let it run early instead of rolling back. Updated plan:
+
+| Date | What |
+|------|------|
+| Wed May 27, 09:10 IST | Engine auto-boots with A+B overlays live on OLD ledger (preview mode) |
+| Wed-Thu | A+B preview — stats still mixed into the 66-trade v1 history |
+| Thu May 28 morning | Audit team cold-boot smoke test |
+| Thu May 28 evening | Run `scripts/archive_and_reset_for_strategy_v2.py` — archive 66 trades, fresh Rs 500K |
+| Fri May 29, 09:10 IST | **Strategy v2 Day 1 OFFICIAL** — clean measurement begins |
+| ~Fri Jun 5 | After ~20 fresh-ledger trades, read v2 PF |
+
+Clean Day #5 of the original framework is technically broken by this
+acceleration, but the practical loss is small — A+B fixes were going to ship
+anyway, and the empirical case for them (May 26 data showed B alone would
+have prevented 91% of that day's loss) is strong enough that we don't need
+another vanilla v1 day for validation.
 - Lifetime PF read at Day-5: if ≥ 1.5 → STOP, don't apply any overlays, just scale capital
 - If lifetime PF < 1.5 → execute the 4-week sequence below
 
