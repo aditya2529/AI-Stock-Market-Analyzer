@@ -56,6 +56,26 @@ _INTERVAL_MAP = {
     "month": "month",
 }
 
+# R8 — intraday resolution -> integer minutes (for the v3 path).
+# Keeps both yfinance-style ("5m") and numeric-only ("5") accepted so
+# the caller doesn't have to remember which adapter expects what.
+_INTRADAY_MINUTES_MAP = {
+    "1m": 1, "1": 1,
+    "5m": 5, "5": 5,
+    "15m": 15, "15": 15,
+    "30m": 30, "30": 30,
+    "60m": 60, "60": 60, "1h": 60,
+}
+
+
+def _resolution_to_minutes(resolution: str) -> int | None:
+    """Return integer minutes for a yfinance-style intraday resolution
+    string, or None if the resolution is daily/weekly/monthly (i.e.
+    handled by the v2 path)."""
+    if resolution is None:
+        return None
+    return _INTRADAY_MINUTES_MAP.get(resolution.lower())
+
 
 def _active_access_token(env_path: str | None = None) -> str | None:
     """Return the active env's access token, or None if missing/invalid.
@@ -147,6 +167,16 @@ class UpstoxAdapter(DataAdapter):
 
     def fetch_ohlcv(self, symbol: str, years: int = 3,
                      resolution: str = "1d") -> pd.DataFrame:
+        # NOTE: this v2 day/week/month path is INTENTIONALLY unchanged
+        # by R8. It still raises ValueError on intraday resolutions
+        # (5m / 15m / 30m / 60m / 1m) — the P42 test
+        # test_fetch_ohlcv_raises_on_unsupported_resolution depends
+        # on that contract. R8 intraday dispatch happens at the
+        # ingestion layer (data/ingestion.py:fetch_and_store), not
+        # here, so the P42-era adapter surface stays bit-for-bit.
+        # Operators who want 5m via Upstox call get_historical_intraday()
+        # directly, or use `main.py fetch --source upstox --resolution 5m`
+        # which routes via fetch_and_store.
         token = _active_access_token()
         if not token:
             raise EnvironmentError(

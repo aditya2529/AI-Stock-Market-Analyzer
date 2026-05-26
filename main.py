@@ -71,9 +71,13 @@ def cmd_fetch(args):
         symbols = DEFAULT_CRYPTO_SYMBOLS
     else:
         symbols = DEFAULT_SYMBOLS
+    # R8 — args.source defaults to "yfinance" so this preserves the
+    # pre-R8 behaviour for any operator who doesn't pass --source.
+    source = getattr(args, "source", None) or "yfinance"
     for sym in symbols:
         try:
-            df = fetch_and_store(sym.strip(), years=args.years, resolution=args.resolution)
+            df = fetch_and_store(sym.strip(), years=args.years,
+                                  resolution=args.resolution, source=source)
             print(f"✓ {sym}: {len(df)} bars fetched and stored.")
         except Exception as e:
             print(f"✗ {sym}: {e}")
@@ -449,6 +453,14 @@ def build_parser() -> argparse.ArgumentParser:
                          help="Fetch default symbol list for a market (nse/us/crypto)")
     p_fetch.add_argument("--years", type=int, default=3)
     p_fetch.add_argument("--resolution", default="1d")
+    # R8 — opt-in Upstox adapter (default yfinance preserves the
+    # existing operator workflow bit-for-bit). Required for 5m
+    # backfills beyond yfinance's 60-day cap.
+    p_fetch.add_argument("--source", default="yfinance",
+                         choices=["yfinance", "upstox"],
+                         help="Adapter source (default: yfinance). "
+                              "Use 'upstox' for >60-day 5m backfill "
+                              "via Upstox v3 historical-candle.")
 
     # features
     p_feat = sub.add_parser("features", help="Compute and display features")

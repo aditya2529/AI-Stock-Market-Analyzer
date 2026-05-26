@@ -40,15 +40,34 @@ def tmp_cache_dir(tmp_path, monkeypatch):
 
 
 def _write_fake_master_csv(path: Path) -> None:
-    """Drop a 4-row instruments CSV in the shape the Upstox master uses
-    (subset of the real columns — only the ones our loader cares about).
+    """Drop a 6-row instruments CSV in the shape the real Upstox
+    master uses (subset of the real columns — only the ones our
+    loader cares about). Real column names:
+        instrument_key, exchange_token, tradingsymbol, name,
+        last_price, expiry, strike, tick_size, lot_size,
+        instrument_type, option_type, exchange
+
+    The fixture includes one bond row (instrument_type=BOND) and one
+    F&O row to verify the loader's EQUITY filter excludes them — they
+    must NOT shadow real equity tickers.
     """
     rows = [
-        "instrument_key,exchange,instrument_type,trading_symbol,name,isin",
-        "NSE_EQ|INE467B01029,NSE_EQ,EQUITY,TCS,Tata Consultancy Services Limited,INE467B01029",
-        "NSE_EQ|INE009A01021,NSE_EQ,EQUITY,INFY,Infosys Limited,INE009A01021",
-        "NSE_EQ|INE002A01018,NSE_EQ,EQUITY,RELIANCE,Reliance Industries Limited,INE002A01018",
-        "NSE_EQ|INE040A01034,NSE_EQ,EQUITY,HDFCBANK,HDFC Bank Limited,INE040A01034",
+        "instrument_key,exchange_token,tradingsymbol,name,last_price,"
+        "expiry,strike,tick_size,lot_size,instrument_type,option_type,exchange",
+        "NSE_EQ|INE467B01029,11536,TCS,Tata Consultancy Services Limited,"
+        "0,,,0.05,1,EQUITY,,NSE_EQ",
+        "NSE_EQ|INE009A01021,408,INFY,Infosys Limited,"
+        "0,,,0.05,1,EQUITY,,NSE_EQ",
+        "NSE_EQ|INE002A01018,2885,RELIANCE,Reliance Industries Limited,"
+        "0,,,0.05,1,EQUITY,,NSE_EQ",
+        "NSE_EQ|INE040A01034,1333,HDFCBANK,HDFC Bank Limited,"
+        "0,,,0.05,1,EQUITY,,NSE_EQ",
+        # Bond row — must NOT show up in lookup (instrument_type != EQUITY).
+        "NSE_EQ|IN2920250163,758718,749RJ35,SDL RJ 7.49% 2035,"
+        "0,,,0.01,100,BOND,,NSE_EQ",
+        # F&O row — wrong exchange + wrong instrument_type, also excluded.
+        "NSE_FO|49000,49000,NIFTY26AUG26000CE,NIFTY Aug 26000 CE,"
+        "0,2026-08-28,26000,0.05,50,OPTIDX,CE,NSE_FO",
     ]
     path.write_text("\n".join(rows) + "\n", encoding="utf-8")
 
@@ -122,6 +141,28 @@ def test_lookup_returns_known_nse_eq_format_for_default_symbols(tmp_cache_dir, m
         ("HDFCBANK.NS", "NSE_EQ|INE040A01034"),
     ]:
         assert ui.lookup_instrument_key(ysym) == expected
+
+
+def test_lookup_filters_out_bonds_and_fno_rows(tmp_cache_dir, monkeypatch):
+    """The Upstox NSE_EQ exchange code includes bonds + government
+    securities (SDL series, IN2920... ISINs) in addition to equities.
+    The loader MUST filter on ``instrument_type == 'EQUITY'`` so a
+    bond's tradingsymbol (e.g. '749RJ35') doesn't shadow a real
+    equity ticker or pollute the .NS lookup namespace.
+    """
+    _write_fake_master_csv(tmp_cache_dir / "upstox_instruments.csv")
+
+    from data.adapters import upstox_instruments as ui
+    monkeypatch.setattr(ui, "_download_master",
+                         lambda p: pytest.fail("should not download"))
+
+    # Bond should NOT be lookup-able under a .NS key (it's not equity).
+    with pytest.raises(KeyError):
+        ui.lookup_instrument_key("749RJ35.NS")
+
+    # F&O row in NSE_FO exchange should NOT pollute .NS namespace either.
+    with pytest.raises(KeyError):
+        ui.lookup_instrument_key("NIFTY26AUG26000CE.NS")
 
 
 def test_lookup_unknown_symbol_raises_keyerror(tmp_cache_dir, monkeypatch):

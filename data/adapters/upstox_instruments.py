@@ -85,7 +85,12 @@ def _cache_is_fresh() -> bool:
         head = pd.read_csv(CACHE_FILE, nrows=1, dtype=str)
     except Exception:
         return False
-    required = {"instrument_key", "exchange", "trading_symbol"}
+    # Real Upstox CSV uses `tradingsymbol` (one word). The
+    # `instrument_type` column lets us filter out bonds + F&O from
+    # the NSE_EQ rows (the master has ~9k NSE_EQ rows; ~2k are
+    # equity, the rest are gov-securities / bond ISINs).
+    required = {"instrument_key", "exchange", "tradingsymbol",
+                 "instrument_type"}
     return required.issubset(set(head.columns))
 
 
@@ -167,7 +172,8 @@ def _load_lookup_table() -> dict[str, str]:
     df = pd.read_csv(CACHE_FILE, dtype=str, low_memory=False)
     # Defensive: master CSV column names sometimes shift across
     # Upstox doc revisions. Only require the columns we use.
-    required = {"instrument_key", "exchange", "trading_symbol"}
+    required = {"instrument_key", "exchange", "tradingsymbol",
+                 "instrument_type"}
     missing = required - set(df.columns)
     if missing:
         raise RuntimeError(
@@ -176,17 +182,24 @@ def _load_lookup_table() -> dict[str, str]:
             f"delete the file to force a fresh download next call."
         )
 
+    # Filter to equity rows only. NSE_EQ in the master includes
+    # ~9k rows but only ~2k are equities — the rest are bonds + gov
+    # securities (SDL / IN-series ISINs) which would otherwise alias
+    # to .NS tickers that the engine never trades.
+    equity_only = df["instrument_type"].astype(str).str.upper().eq("EQUITY")
+    df = df[equity_only]
+
     mapping: dict[str, str] = {}
     nse_mask = df["exchange"].astype(str).str.upper().eq("NSE_EQ")
-    for sym, key in zip(df.loc[nse_mask, "trading_symbol"].astype(str),
+    for sym, key in zip(df.loc[nse_mask, "tradingsymbol"].astype(str),
                           df.loc[nse_mask, "instrument_key"].astype(str)):
         mapping[f"{sym.upper()}.NS"] = key
 
     if "BSE_EQ" in df["exchange"].astype(str).str.upper().unique():
         bse_mask = df["exchange"].astype(str).str.upper().eq("BSE_EQ")
-        for sym, key in zip(df.loc[bse_mask, "trading_symbol"].astype(str),
+        for sym, key in zip(df.loc[bse_mask, "tradingsymbol"].astype(str),
                               df.loc[bse_mask, "instrument_key"].astype(str)):
-            # Don't overwrite an NSE entry of the same trading_symbol —
+            # Don't overwrite an NSE entry of the same tradingsymbol —
             # the engine universe is .NS-first.
             yf_key = f"{sym.upper()}.BO"
             if yf_key not in mapping:
