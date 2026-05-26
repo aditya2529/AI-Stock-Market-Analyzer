@@ -231,7 +231,37 @@ User explicitly rejected the slower one-fix-at-a-time approach because of impati
 
 ### Pre-condition for kicking off
 
-- 5 clean operational days accumulated (as of May 25 EOD: counter is at **3/5** — user accepted May 25 as clean despite 3 engine restarts + 1 DB reconcile, on the grounds that all manual ops were planned, logged, user-authorized, and engine never crashed unprompted)
+- 5 clean operational days accumulated (as of May 26 EOD: counter is at **4/5** —
+  May 25 user-overridden as clean (3 restarts + DB reconcile, all planned + logged),
+  May 26 was a TRUE clean day (no manual ops, no engine restart, watchdog quiet,
+  force-close auto, 8 trades cycled cleanly, P44+P46 fixes held through full session).
+  Need 1 more clean day before Day-5 verdict.)
+
+**Important correction to original framing (May 26 evening):**
+The brief assumed v1 was trained on multi-year 2014-2023 data and was therefore
+"stale" with respect to 2024-2026 market regime. **That framing was wrong.**
+Audit-team Round 7 investigation revealed:
+
+- v1 actually trains on a rolling ~60-day yfinance window
+- Refreshed monthly via `run_monthly_retrain.bat`
+- So v1 is NOT calibrated on years-old data — it sees the most-recent ~2 months
+- yfinance free tier caps 5m bars at 60 days, which is the structural reason
+- DB currently holds only ~80 days of 5m bars total
+
+**Consequence for the Day-5 framework:**
+- "Retrain on fresh data" (Tier 2.5 step C) does NOT fix what we thought it fixed
+  on yfinance data alone. v1 already sees fresh data.
+- A retrain on more-recent slices would actually have LESS data than v1 → worse, not better
+- The real fix is structural: procure 2+ years of 5m bars from Upstox v2
+  historical-candle endpoint (logged as P48, Round 8 audit-team work)
+- Once Upstox backfill lands (~mid-June), the retrain becomes meaningful as Round 9
+- Tier 2.5 A + B (cooldown + 14:00 cutoff) ships Mon June 1 unchanged — they
+  don't depend on the data-source fix and have empirical support (May 26 data
+  showed B alone would have prevented 91% of today's loss)
+
+This is a correction to the original strategy framework, not a new pivot. The
+spirit of the Day-5 plan stands; only the C implementation path changes from
+"retrain on stale-fixed data" to "retrain on Upstox-backfilled data".
 - Lifetime PF read at Day-5: if ≥ 1.5 → STOP, don't apply any overlays, just scale capital
 - If lifetime PF < 1.5 → execute the 4-week sequence below
 

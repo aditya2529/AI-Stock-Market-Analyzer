@@ -2133,6 +2133,72 @@ May 25, 13:20 IST. Reproducible from `paper_trades` table in
 
 ---
 
+## P48. Upstox historical 5m adapter — yfinance 60d cap blocks proper model retrain (HIGH)
+
+**Status:** OPEN — scoped May 26, 2026 evening. Round 8 brief shipped to
+audit team same night. Build budget ~1 week. Owner: audit team.
+
+**Discovered during Round 7 (Tier 2.5 + retrain attempt):** The original
+Round 7 brief asked the audit team to retrain the ensemble on 2024-2026
+5-min data. They came back with a critical finding before kicking off:
+
+| Component | Assumption in R7 brief | Reality from DB inspection |
+|-----------|----------------------|---------------------------|
+| 5m bar coverage | "data ending ~early 2024" implying multi-year | yfinance free tier caps at 60 days; DB holds ~80 days only |
+| Train slice (Option A) | 2024-01-01 → 2026-02-28 (~470K rows) | Only 17 trading days available (Feb 11-28), ~24K rows |
+| Holdout slice (Option A) | 2026-03-01 → 2026-05-25 (~60K rows) | 63 days available, ~100K rows |
+| v1 training history | "trained on 2014-2023, market-regime stale" | Trained on rolling ~60-day yfinance window, refreshed monthly via `run_monthly_retrain.bat` |
+
+**Implications:**
+
+1. **The "stale calibration" hypothesis for v1 is wrong.** v1 was never
+   trained on multi-year history. It runs on the most-recent ~60 days
+   refreshed monthly. So "retrain on fresh data" doesn't fix what we
+   thought it fixed — v1 already sees fresh data.
+
+2. **A v2 trained on Option A's 17-day train slice would have LESS data
+   than v1's ~60-day window.** v2 would almost certainly underperform v1,
+   not improve on it.
+
+3. **The right fix is structural: get more historical 5m data.** yfinance
+   doesn't expose it on the free tier. Upstox v2 historical-candle
+   endpoint does (we already have prod app credentials from P42).
+
+**Decision — Round 7 ships only A + B (cooldown + 14:00 cutoff). C deferred.**
+The retrain harness commit (`b935c21`) is held local; do not push.
+
+**Round 8 scope (sent to audit team May 26 evening):**
+- Extend `data/adapters/upstox_adapter.py` with `get_historical_ohlcv()`
+- New CLI flag/command for batched backfill (200 symbols × 2 years × 5m)
+- Symbol mapping (yfinance `TCS.NS` → Upstox `NSE_EQ|INE...`)
+- Rate-limit handling (~25 req/sec Upstox free tier)
+- All writes through existing `data/database.upsert_ohlcv` (no schema change)
+- Sandbox integration test first (P42 sandbox creds), prod last (P42 prod creds)
+- Engine + dashboard untouched. yfinance stays the default. Upstox opt-in.
+
+**Round 9 (future):** with 2 years of real 5m data in the DB, re-open the
+retrain. Run the SAME holdout-only harness the audit team already built
+(`b935c21`, kept local) — only now train slice will be ~24 months instead
+of 17 days. v2 retrain becomes statistically meaningful.
+
+**Why this is HIGH priority:** without a proper historical data source,
+every future model improvement is capped by yfinance's 60-day window.
+Pre-real-money launch, this is a blocker. Post-launch, it's an ongoing
+operational handicap.
+
+**Hypotheses to NOT pursue (already rejected):**
+- Polygon / Alpha Vantage / paid yfinance — Upstox is already wired and
+  free for our usage tier
+- 1d bars for training — engine consumes 5m at inference; structural
+  mismatch
+- Synthetic data augmentation — too risky for a money-handling system
+
+**Standing rule honored:** Round 7 close (A+B ship Mon June 1) is NOT
+blocked by Round 8. They run in parallel. Audit team can split focus
+between final R7 smoke test (Thu) and starting R8 build (Fri).
+
+---
+
 ## P47. P40 phantom credit RECURRED — root cause never identified (HIGH)
 
 **Status:** SYMPTOM HOT-PATCHED post-market on Sun May 25, ~19:25 IST
