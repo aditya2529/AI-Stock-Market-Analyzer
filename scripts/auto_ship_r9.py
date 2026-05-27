@@ -47,19 +47,19 @@ MIN_MARGIN_OVER_V1 = 0.10
 def parse_pf_from_summary(text: str) -> tuple[float | None, float | None]:
     """Extract v1 PF and v2 PF from the summary markdown.
 
-    Audit team's format (b935c21 harness) outputs a table like:
-      | Metric | v1 | v2 |
-      | PF | 0.69 | 1.42 |
-    We grep for the PF row and pull the two numbers.
+    Audit team's format (R7 b935c21 harness):
+      | Metric        | v1 (current production) | v2 (retrained) | Δ |
+      | Profit Factor | 2.390                   | 2.120          | -0.270 |
     """
-    # Try the table pattern
     for line in text.splitlines():
-        if re.search(r"\bPF\b", line, re.IGNORECASE) and "|" in line:
-            nums = re.findall(r"[-+]?\d*\.?\d+", line)
+        # Match "Profit Factor" specifically (not just "PF")
+        if (re.search(r"profit\s*factor", line, re.IGNORECASE)
+                and "|" in line):
+            # Pull all numbers; expect [v1_pf, v2_pf, delta]
+            nums = re.findall(r"[-+]?\d+\.\d+", line)
             if len(nums) >= 2:
-                # Skip leading row-label digits if any; take last 2
                 try:
-                    return float(nums[-2]), float(nums[-1])
+                    return float(nums[0]), float(nums[1])
                 except ValueError:
                     continue
     return None, None
@@ -92,10 +92,10 @@ def send_telegram(message: str) -> bool:
         import urllib.request
         import urllib.parse
         url = f"https://api.telegram.org/bot{token}/sendMessage"
+        # Use plain text — HTML parse_mode rejects bare '<=' / '<' chars
         data = urllib.parse.urlencode({
             "chat_id": chat_id,
             "text": message,
-            "parse_mode": "HTML",
         }).encode()
         req = urllib.request.Request(url, data=data)
         with urllib.request.urlopen(req, timeout=10) as resp:
@@ -165,34 +165,34 @@ def main() -> int:
         return 0
 
     message = (
-        f"🤖 <b>R9 Auto-SHIP — {verdict}</b>\n\n"
-        f"v1 PF: <code>{v1_pf}</code>\n"
-        f"v2 PF: <code>{v2_pf}</code>\n\n"
+        f"R9 Auto-SHIP: {verdict}\n\n"
+        f"v1 PF: {v1_pf}\n"
+        f"v2 PF: {v2_pf}\n\n"
         f"{reason}"
     )
 
     if verdict == "SHIP":
         try:
             deploy_v2()
-            print(f"\n  ✅ v2 deployed.")
-            print(f"     Backup: {V1_BACKUP.name}")
-            print(f"     Active: {V1_PKL.name} (now v2)")
-            message += "\n\n✅ Deployed. Engine boots Thu/Fri with v2."
+            print("\n  [OK] v2 deployed.")
+            print(f"       Backup: {V1_BACKUP.name}")
+            print(f"       Active: {V1_PKL.name} (now v2)")
+            message += "\n\nDeployed. Engine boots next session with v2."
         except Exception as e:
-            print(f"\n  ❌ Deploy FAILED: {e}")
-            message += f"\n\n❌ Deploy failed: {e}"
+            print(f"\n  [FAIL] Deploy failed: {e}")
+            message += f"\n\nDeploy failed: {e}"
     elif verdict == "NO_SHIP":
-        print(f"\n  Kept v1. No engine touch.")
+        print("\n  Kept v1. No engine touch.")
         message += "\n\nKept v1. No deploy."
     elif verdict == "HOLD":
-        print(f"\n  HOLD — needs your review Thu morning.")
-        message += "\n\n🟡 HOLD — needs your decision Thu morning."
+        print("\n  HOLD - needs your manual review.")
+        message += "\n\nHOLD - needs your decision."
     else:
-        print(f"\n  ERROR — check {SUMMARY_MD.name} manually.")
-        message += "\n\n⚠️ Parse error — review summary file manually."
+        print(f"\n  ERROR - check {SUMMARY_MD.name} manually.")
+        message += "\n\nParse error - review summary file manually."
 
     sent = send_telegram(message)
-    print(f"\n  Telegram alert: {'sent ✅' if sent else 'FAILED ❌'}")
+    print(f"\n  Telegram alert: {'sent OK' if sent else 'FAILED'}")
 
     return 0 if verdict in ("SHIP", "NO_SHIP", "HOLD") else 2
 

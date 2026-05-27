@@ -2133,6 +2133,107 @@ May 25, 13:20 IST. Reproducible from `paper_trades` table in
 
 ---
 
+## P49. Backtest vs live PF gap — 2.39 vs 0.69 (CRITICAL — investigate before any more strategy changes)
+
+**Status:** OPEN — surfaced May 27 23:35 IST by R9 holdout backtest.
+
+**The bombshell:** R9's holdout-only backtest of the **current production
+v1 model** on the 2026-03-01 → 2026-05-26 window shows:
+
+| Metric | v1 on holdout backtest |
+|---|---|
+| Profit Factor | **2.390** |
+| Sharpe | 3.961 |
+| Win rate | 48.3% |
+| Max drawdown | 4.5% |
+| Trades | 615 |
+
+But the **same v1 model running LIVE** has been losing money:
+
+| Metric | v1 live (66 lifetime trades through May 26) |
+|---|---|
+| Profit Factor | ~0.69 |
+| Sharpe | (not computed, but negative) |
+| Win rate | ~40% |
+| Lifetime P&L | -₹14,295 |
+| Trades | 66 |
+
+**Backtest says strategy works. Live says strategy bleeds. Same model,
+same window, same symbols.** Gap is ~3.5× in PF terms.
+
+This means EVERY strategy improvement we ship (R7 A+B overlays, R10
+SL widening, etc.) is being judged by backtest metrics that don't
+reflect live behavior. We cannot trust holdout-PF as a deploy gate
+until this gap is closed.
+
+**Suspected causes (priority order):**
+
+1. **Slippage modeling.** Backtest applies `BROKERAGE_PCT + SLIPPAGE_PCT`
+   constants to fill prices. Live fills may slip wider on the tight
+   1× ATR SL distances (avg ~0.6-1%) — even 0.1% extra slippage
+   turns winners into losers at this scale.
+
+2. **Engine-side filters not present in the holdout sim.** Live engine
+   applies cooldowns (SL + target), exposure caps, `daily_count_capped`,
+   `max_pos` limits, regime gates. Holdout harness simulates inference
+   but may not replay these gates exactly.
+
+3. **Real-time signal latency.** Holdout uses instant inference at each
+   bar close. Live has ~0.3-1.5s latency between bar close and BUY
+   decision — price has moved.
+
+4. **Symbol-order serial-vs-parallel mismatch.** Live engine iterates
+   one symbol at a time per tick; holdout runs each symbol independently
+   in a loop. Order matters when cash bucket is shared across symbols
+   and `max_pos = 5`.
+
+5. **Confidence-floor distribution gap.** Live fires at conf ≥ 0.60
+   exactly. Holdout's distribution of "trades above floor" may differ
+   from what the engine actually opens (e.g. holdout sees signal at
+   0.6001, engine sees 0.5998 due to floating-point drift).
+
+6. **Universe mismatch.** Backtest used 25 DEFAULT_SYMBOLS uniformly.
+   Live engine picks top-50 from 200 daily by liquidity/volatility —
+   the actual tradable universe each day is a different subset.
+
+**Why this is CRITICAL:**
+
+- We've been using backtest-PF as the deploy gate for R9 (and would
+  for R10, R11+). If backtest is fiction, we're shipping based on
+  fiction.
+- Today's R9 verdict (v2 worse than v1 on backtest → no ship) was
+  technically correct under the rules but operationally meaningless
+  — we don't know if v2 would actually be better LIVE.
+- Could explain why v1 has been profitable in backtest for 8+ months
+  but losing in paper since paper trading started.
+
+**Proposed audit-team brief (R11 — design TBD by audit team):**
+
+Build an "engine-replay backtest" that uses the EXACT engine event
+loop (`intraday/engine.py`'s tick processor) replaying historical
+bars in chronological order, with the same cash bucket, position
+limits, cooldowns, and signal-latency simulation. Compare its PF
+against the current shortcut harness's PF on the same holdout.
+
+If the engine-replay PF matches the live ~0.69 → root cause is
+in the engine event loop divergence, fix the harness to mirror it.
+
+If the engine-replay PF still shows ~2.39 → root cause is slippage
+or live-data feed issues; need to instrument live signal pipeline
+to log fill vs. expected price gap.
+
+**Do NOT during fix:**
+- Change SL/target multipliers (R10 separate)
+- Change conf threshold
+- Touch the engine's tick loop
+- Modify the deployed v1 model
+
+**Estimated value:** Without closing this gap, every future PF-based
+deploy decision is on shaky ground. Should be top-priority for the
+audit team's next round after R9 close.
+
+---
+
 ## P48. Upstox historical 5m adapter — yfinance 60d cap blocks proper model retrain (HIGH)
 
 **Status:** OPEN — scoped May 26, 2026 evening. Round 8 brief shipped to
