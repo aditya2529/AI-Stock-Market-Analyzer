@@ -88,7 +88,10 @@ logger = logging.getLogger("retrain_v2")
 TRAIN_START = pd.Timestamp("2024-01-01")
 TRAIN_END_INCLUSIVE = pd.Timestamp("2026-02-28 23:59:59")
 HOLDOUT_START = pd.Timestamp("2026-03-01 00:00:00")
-HOLDOUT_END_INCLUSIVE = pd.Timestamp("2026-05-25 23:59:59")
+# R9 bump from 2026-05-25 -> 2026-05-26 per ops brief (Strategy v2
+# Day 1 ran today; Mon May 26 bars are in the backfilled DB and
+# belong in the holdout window).
+HOLDOUT_END_INCLUSIVE = pd.Timestamp("2026-05-26 23:59:59")
 
 # Mirror the production confidence floor — the holdout backtest must
 # evaluate the model under the same trade-eligibility rules the live
