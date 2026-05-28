@@ -295,18 +295,11 @@ def run_replay(
     )
     from backtesting.metrics import compute_all
 
-    # ── 1. Sandbox DB redirect + bootstrap ───────────────────────────
-    db_mod.DB_PATH = str(sandbox_db_path)
-    init_db()
-    init_paper_tables()
-    set_cash(portfolio_value)
-    set_config("peak_value", portfolio_value)
-    set_config("initial_cash", portfolio_value)
-    set_config("nse_cash", portfolio_value)
-    set_config("nse_initial_cash", portfolio_value)
-    set_config("nse_peak_value", portfolio_value)
-
-    # ── 2. Build per-symbol raw + featured maps ──────────────────────
+    # ── 1. Load OHLCV from the REAL market_data.db BEFORE redirect ───
+    # Critical ordering: load_ohlcv reads through db_mod.DB_PATH; if we
+    # redirected to the empty sandbox first, load_ohlcv would return
+    # empty frames for every symbol and the replay would have nothing
+    # to drive.
     ctx = ReplayContext()
     skipped = []
     for sym in symbols:
@@ -339,6 +332,17 @@ def run_replay(
             "no symbols had usable 5m data in the holdout window — "
             "check market_data.db population")
 
+    # ── 2. NOW redirect DB to sandbox + bootstrap paper-trading state
+    db_mod.DB_PATH = str(sandbox_db_path)
+    init_db()
+    init_paper_tables()
+    set_cash(portfolio_value)
+    set_config("peak_value", portfolio_value)
+    set_config("initial_cash", portfolio_value)
+    set_config("nse_cash", portfolio_value)
+    set_config("nse_initial_cash", portfolio_value)
+    set_config("nse_peak_value", portfolio_value)
+
     # ── 3. Build chronological timeline from holdout slice only ──────
     timeline = set()
     for sym, raw in ctx.raw_by_symbol.items():
@@ -363,6 +367,67 @@ def run_replay(
         raise RuntimeError(
             f"ensemble at {ensemble_path} is missing predict_with_confidence — "
             f"is this a valid Ensemble pickle?")
+
+    # ── 4b. Precompute predictions per symbol (perf optimisation) ────
+    # The engine calls ensemble.predict_with_confidence(featured) on a
+    # sliced featured df every tick. Per-call cost (~1s in the smoke
+    # run) dominates wall-clock: 25 symbols × 4725 ticks × 1s = ~34 hr
+    # without this optimisation.
+    #
+    # LSTM inference is causal — prediction at bar T uses only bars
+    # <= T. So pre-computing once on the FULL featured df, then
+    # slicing on demand, is mathematically equivalent to per-bar
+    # re-prediction. Per-eval cost drops to a Series .loc lookup
+    # (~10 us) → full holdout ~10-20 min.
+    print(f"[replay] precomputing predictions per symbol …")
+    import time
+    precompute_start = time.time()
+    predictions_by_symbol = {}
+    for sym, feat_full in ctx.featured_by_symbol.items():
+        predictions_by_symbol[sym] = ensemble.predict_with_confidence(feat_full)
+    print(f"[replay] precompute done in "
+          f"{time.time() - precompute_start:.1f}s "
+          f"({len(predictions_by_symbol)} symbols)")
+
+    # Sanity check causality on ONE symbol/timestamp — confirms the
+    # precompute is mathematically equivalent to per-bar inference.
+    # If this fails the precompute is unsafe and we fall back.
+    causal_safe = True
+    try:
+        sample_sym = next(iter(predictions_by_symbol))
+        sample_feat = ctx.featured_by_symbol[sample_sym]
+        # Pick a bar ~80% into the precomputed range (avoids warm-up
+        # edge but stays inside the data) — first cast to a position.
+        mid_pos = int(len(sample_feat) * 0.8)
+        mid_ts = sample_feat.index[mid_pos]
+        sliced = sample_feat.loc[sample_feat.index <= mid_ts]
+        per_bar = ensemble.predict_with_confidence(sliced).iloc[-1]
+        from_precomp = predictions_by_symbol[sample_sym].loc[mid_ts]
+        if (per_bar["signal"] != from_precomp["signal"]
+                or abs(per_bar["confidence"] - from_precomp["confidence"]) > 1e-6):
+            causal_safe = False
+            print(f"  [replay] WARN: causality check failed at "
+                  f"{sample_sym}@{mid_ts}; precompute will be bypassed.")
+            print(f"    per-bar:    sig={per_bar['signal']} conf={per_bar['confidence']:.4f}")
+            print(f"    precompute: sig={from_precomp['signal']} conf={from_precomp['confidence']:.4f}")
+    except Exception as e:
+        causal_safe = False
+        print(f"  [replay] WARN: causality check raised {e!r}; bypassing precompute.")
+
+    # Patch ensemble.predict_with_confidence on this instance only.
+    # Restored in the finally block below.
+    import types
+    _original_predict = ensemble.predict_with_confidence
+    if causal_safe:
+        def _patched_predict(self, df):
+            sym = ctx.current_symbol
+            clock = ctx.current_clock
+            if (sym is None or sym not in predictions_by_symbol
+                    or clock is None):
+                return _original_predict(df)
+            pred_full = predictions_by_symbol[sym]
+            return pred_full.loc[pred_full.index <= clock]
+        ensemble.predict_with_confidence = types.MethodType(_patched_predict, ensemble)
 
     # ── 5. Install patches manually + run replay loop ────────────────
     wall_start = time.time()
@@ -418,6 +483,12 @@ def run_replay(
                       f"symbol-evals {n_eval}")
     finally:
         _restore_engine_patches(originals)
+        # Restore the ensemble's original predict method (we patched
+        # it on the instance, not the class).
+        try:
+            ensemble.predict_with_confidence = _original_predict
+        except Exception:
+            pass
 
     wall_clock_secs = time.time() - wall_start
     print(f"[replay] complete: {len(timeline)} ticks, {n_eval} "
@@ -434,14 +505,15 @@ def run_replay(
     con.close()
     print(f"[replay] closed trades in sandbox DB: {len(trades_df)}")
 
-    # Map paper_trades schema onto compute_all's expected shape
-    # (it expects 'pnl' + 'return' columns).
+    # Map paper_trades schema (net_pnl, return_pct) onto compute_all's
+    # expected shape (pnl, return). net_pnl is the AFTER-fees P&L —
+    # matches what the engine writes for the live engine. We rename
+    # rather than copy to keep the DataFrame slim.
     if not trades_df.empty:
-        # `pnl` already exists in paper_trades.
-        # `return` = pct return relative to entry cost.
-        if "return" not in trades_df.columns:
-            entry = trades_df["entry_price"] * trades_df["shares"]
-            trades_df["return"] = trades_df["pnl"] / entry.replace(0, 1)
+        trades_df = trades_df.rename(columns={
+            "net_pnl": "pnl",
+            "return_pct": "return",
+        })
         # Equity curve from cumulative trade returns
         eq = (1.0 + trades_df["return"]).cumprod()
         eq = pd.concat([pd.Series([1.0]), eq], ignore_index=True)
