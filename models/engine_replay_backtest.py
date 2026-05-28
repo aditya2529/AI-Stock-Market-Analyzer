@@ -554,3 +554,116 @@ def run_replay(
         "ensemble_path": str(ensemble_path),
         "skipped_symbols": skipped,
     }
+
+
+# ── CLI entry ────────────────────────────────────────────────────────
+
+
+def _cli() -> int:
+    """Thin argparse wrapper over run_replay so ops can reproduce
+    R11 results without writing a driver script.
+
+    Examples:
+      # Replay the R11 holdout against current production ensemble
+      python models/engine_replay_backtest.py \\
+          --symbols default \\
+          --holdout-start 2026-03-01 \\
+          --holdout-end 2026-05-26 \\
+          --sandbox-db logs/r11_replay.db \\
+          --output logs/r11_result.json
+
+      # Replay a custom 38-symbol universe (Part 3 style)
+      python models/engine_replay_backtest.py \\
+          --symbols @scripts/symbols_38.txt \\
+          --holdout-start 2026-05-14 \\
+          --holdout-end 2026-05-26 \\
+          --sandbox-db logs/r11_part3.db \\
+          --output logs/r11_part3_result.json
+    """
+    import argparse
+    import json
+    import sys as _sys
+    # Force utf-8 stdout so the Delta / Rs symbols don't trip cp1252
+    # on Windows (same bug R9's recovery script worked around).
+    if _sys.stdout.encoding and _sys.stdout.encoding.lower() != "utf-8":
+        try:
+            _sys.stdout.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
+    parser = argparse.ArgumentParser(
+        prog="engine_replay_backtest",
+        description="R11 engine-replay backtest — runs the LIVE intraday.engine "
+                    "tick processor chronologically over historical 5m bars.",
+    )
+    parser.add_argument(
+        "--symbols", required=True,
+        help='Comma-separated NSE tickers (e.g. "TCS.NS,INFY.NS"), '
+              'or "default" for config.DEFAULT_SYMBOLS, '
+              'or "@path/to/file.txt" for newline-separated.',
+    )
+    parser.add_argument("--holdout-start", required=True,
+                          help="Inclusive start (YYYY-MM-DD or ISO timestamp)")
+    parser.add_argument("--holdout-end", required=True,
+                          help="Inclusive end (YYYY-MM-DD or ISO timestamp)")
+    parser.add_argument(
+        "--ensemble", default="models/saved/ensemble_intraday.pkl",
+        help="Path to ensemble .pkl (default: production v1)",
+    )
+    parser.add_argument("--sandbox-db", required=True,
+                          help="Path for the temp SQLite DB (will be created)")
+    parser.add_argument(
+        "--output", required=True,
+        help="Path for the result JSON",
+    )
+    parser.add_argument("--portfolio", type=float, default=500_000.0,
+                          help="Starting cash for the sandbox (default 500_000)")
+    parser.add_argument("--progress-every", type=int, default=500,
+                          help="Print one progress line every N ticks")
+    args = parser.parse_args()
+
+    # Resolve --symbols → list
+    if args.symbols == "default":
+        from config import DEFAULT_SYMBOLS
+        symbols = list(DEFAULT_SYMBOLS)
+    elif args.symbols.startswith("@"):
+        symbols = [s.strip() for s in
+                    Path(args.symbols[1:]).read_text().splitlines()
+                    if s.strip() and not s.strip().startswith("#")]
+    else:
+        symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
+    if not symbols:
+        parser.error("--symbols resolved to an empty list")
+
+    holdout_start = pd.Timestamp(args.holdout_start)
+    holdout_end = pd.Timestamp(args.holdout_end)
+    if holdout_start > holdout_end:
+        parser.error("--holdout-start must be on or before --holdout-end")
+
+    result = run_replay(
+        symbols=symbols,
+        holdout_start=holdout_start,
+        holdout_end=holdout_end,
+        ensemble_path=Path(args.ensemble),
+        sandbox_db_path=Path(args.sandbox_db),
+        portfolio_value=float(args.portfolio),
+        progress_every=int(args.progress_every),
+    )
+
+    out_path = Path(args.output)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(result, indent=2, default=str),
+                          encoding="utf-8")
+    print(f"\nResult JSON -> {out_path}")
+
+    m = result["metrics"]
+    print(f"  n_trades        : {m.get('n_trades', 0)}")
+    print(f"  profit_factor   : {m.get('profit_factor', float('nan')):.3f}")
+    print(f"  win_rate        : {m.get('win_rate', 0):.3f}")
+    print(f"  max_drawdown    : {m.get('max_drawdown', 0):.3f}")
+    print(f"  wall_clock_secs : {result['wall_clock_secs']:.1f}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_cli())
