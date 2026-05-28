@@ -205,6 +205,51 @@ def _market_open() -> bool:
     return open_ <= now <= close_
 
 
+def _is_nse_trading_day_today() -> bool | None:
+    """P50: detect NSE holidays by checking NIFTY 50 for today's bar.
+
+    Returns:
+        True  — confirmed trading day (today's bar present in yfinance)
+        False — confirmed holiday (no today bar after market should be open)
+        None  — too early to tell (called before 09:25 IST) OR yfinance error
+
+    Logic: On a normal trading day, NSE publishes the daily ^NSEI bar
+    within ~5-10 min of market open (09:15 IST). If at 09:25 IST or
+    later no today bar exists, it is almost certainly a holiday.
+
+    Caller must handle the None case (treat as "continue, recheck next
+    tick"). Fail-open on errors so a yfinance flake never blocks a real
+    trading session.
+    """
+    now = _ist_now()
+    # Need at least 10 min past market open to be sure
+    earliest_check_time = now.replace(hour=9, minute=25, second=0, microsecond=0)
+    if now < earliest_check_time:
+        return None  # Too early — yfinance may not have today's bar yet
+
+    try:
+        import yfinance as yf
+        df = yf.download(
+            "^NSEI", period="5d", interval="1d",
+            progress=False, auto_adjust=True,
+        )
+        if df.empty:
+            return None  # Fail-open — can't determine
+        today_date = now.date()
+        # Walk index for today's date
+        for idx in df.index:
+            try:
+                idx_date = idx.date() if hasattr(idx, "date") else idx
+                if idx_date == today_date:
+                    return True
+            except Exception:
+                continue
+        return False  # Today not in last 5 NIFTY bars after 09:25 → holiday
+    except Exception as e:
+        logger.warning("P50: holiday check failed (%s) — assuming trading day", e)
+        return None  # Fail-open
+
+
 def _should_force_close() -> bool:
     now = _ist_now()
     fh, fm = INTRADAY_FORCE_CLOSE_TIME
@@ -578,6 +623,10 @@ def run_intraday_session(symbols: list[str], ensemble, portfolio_value: float = 
     PULSE_EVERY_N_TICKS = 6
     new_today = 0                  # counter — incremented on each opened position
     closed_today = 0               # counter — incremented on each close
+    # P50: holiday-check state. None until the first conclusive answer.
+    # On True we set a flag so we don't recheck every tick. On False we
+    # exit cleanly with a Telegram alert.
+    holiday_confirmed_trading = False
 
     while True:
         now = _ist_now()
@@ -604,6 +653,32 @@ def run_intraday_session(symbols: list[str], ensemble, portfolio_value: float = 
         if not _market_open():
             print(f"  [{now.strftime('%H:%M')}] Market closed. Session ended.")
             break
+
+        # P50: check if today is an NSE holiday. Runs at start of each tick
+        # until we get a conclusive answer. Returns None pre-09:25 (too early),
+        # True when today's NIFTY bar appears (trading day confirmed), or
+        # False if NSE clearly didn't trade today (holiday).
+        if not holiday_confirmed_trading:
+            holiday_result = _is_nse_trading_day_today()
+            if holiday_result is False:
+                logger.warning(
+                    "P50: NSE holiday detected — no today bar in NIFTY 50 after "
+                    "09:25 IST. Exiting session cleanly. No trades will fire."
+                )
+                try:
+                    from alerts.telegram_bot import send_message
+                    send_message(
+                        f"<b>NSE Holiday Detected</b>\n"
+                        f"<i>{now.strftime('%a %d %b %H:%M IST')}</i>\n"
+                        f"Engine skipping today's session. No trades will fire."
+                    )
+                except Exception as e:
+                    logger.warning("P50 telegram alert failed (non-fatal): %s", e)
+                break
+            elif holiday_result is True:
+                holiday_confirmed_trading = True
+                logger.info("P50: NIFTY 50 has today's bar — trading day confirmed.")
+            # else None: too early, recheck next tick
 
         # Force close at 3:15 PM
         if _should_force_close() and not forced_closed:
