@@ -312,3 +312,120 @@ def test_precompute_features_is_idempotent_per_symbol(sample_raw_bars):
     f2 = precompute_features(sample_raw_bars)
     assert f1.shape == f2.shape
     assert list(f1.columns) == list(f2.columns)
+
+
+# ── E. R12 block-reason instrumentation ──────────────────────────────
+
+
+def test_block_reason_logger_recognises_all_engine_gate_actions():
+    """The logger's BLOCK_ACTIONS set must cover every engine-side
+    block path. If a future engine commit adds a new gate (e.g.
+    R10's wider-SL might add a new `_action` string), this test will
+    flag the missing coverage at the next pytest run."""
+    from models.engine_replay_backtest import BlockReasonLogger
+
+    # Current engine block-action strings (intraday/engine.py:_process_symbol
+    # + tick_counts dict in run_intraday_session L554-565).
+    required = {
+        "regime_blocked",       # regime gate HIGH_VOL/UNKNOWN/TRENDING_DOWN BUY
+        "conf_blocked",         # confidence < 0.60
+        "cooldown",             # P30 SL cooldown
+        "target_cooldown",      # R7-A target cooldown
+        "max_pos",              # 5-slot cap
+        "time_cutoff",          # R7-B 14:00 IST
+        "exposure_capped",      # P28 80% exposure
+        "daily_loss_halt",      # P28 -3% loss
+        "daily_count_capped",   # P28 8 trades/day
+    }
+    assert required <= BlockReasonLogger.BLOCK_ACTIONS, (
+        f"missing block actions: {required - BlockReasonLogger.BLOCK_ACTIONS}")
+
+
+def test_block_reason_logger_records_block(monkeypatch):
+    """maybe_record() appends a row when _action is a known block."""
+    from models.engine_replay_backtest import BlockReasonLogger
+    log = BlockReasonLogger()
+    clock = pd.Timestamp("2026-03-05 11:30:00")
+
+    log.maybe_record("TCS.NS", clock,
+                      result={"_action": "conf_blocked", "symbol": "TCS.NS"},
+                      prediction_row=pd.Series({
+                          "signal": "BUY", "confidence": 0.55, "regime": "TRENDING_UP"
+                      }))
+    assert len(log.records) == 1
+    rec = log.records[0]
+    assert rec["symbol"] == "TCS.NS"
+    assert rec["block_reason"] == "conf_blocked"
+    assert rec["confidence"] == pytest.approx(0.55)
+    assert rec["regime"] == "TRENDING_UP"
+    assert rec["signal"] == "BUY"
+
+
+def test_block_reason_logger_ignores_non_block_actions():
+    """Returns with _action='opened' / 'closed' / None / non-dict
+    must NOT generate block records."""
+    from models.engine_replay_backtest import BlockReasonLogger
+    log = BlockReasonLogger()
+    clock = pd.Timestamp("2026-03-05 11:30:00")
+
+    log.maybe_record("TCS.NS", clock, None)
+    log.maybe_record("TCS.NS", clock, {"_action": "opened", "symbol": "TCS.NS"})
+    log.maybe_record("TCS.NS", clock, {"_action": "closed", "symbol": "TCS.NS"})
+    log.maybe_record("TCS.NS", clock, "not-a-dict")
+    log.maybe_record("TCS.NS", clock, {})  # no _action key
+    assert log.records == []
+
+
+def test_block_reason_logger_flush_writes_csv_with_header(tmp_path):
+    """flush() must write a header row even when no records were
+    captured — so downstream readers (pandas.read_csv etc) don't
+    crash on a missing-file or zero-row condition."""
+    from models.engine_replay_backtest import BlockReasonLogger
+    log = BlockReasonLogger()
+    path = tmp_path / "empty.csv"
+    n = log.flush(path)
+    assert n == 0
+    assert path.exists()
+    content = path.read_text(encoding="utf-8")
+    header = content.splitlines()[0].split(",")
+    assert "symbol" in header
+    assert "block_reason" in header
+
+
+def test_block_reason_logger_flush_writes_data_rows(tmp_path):
+    """flush() with N records writes N+1 lines (header + N rows)
+    and the rows survive pandas.read_csv round-trip."""
+    from models.engine_replay_backtest import BlockReasonLogger
+    log = BlockReasonLogger()
+    clock = pd.Timestamp("2026-03-05 11:30:00")
+
+    for action in ("regime_blocked", "conf_blocked", "max_pos"):
+        log.maybe_record(
+            "TCS.NS", clock,
+            result={"_action": action, "symbol": "TCS.NS"},
+            prediction_row=pd.Series({
+                "signal": "BUY", "confidence": 0.55, "regime": "TRENDING_UP"
+            }),
+        )
+
+    path = tmp_path / "blocks.csv"
+    n = log.flush(path)
+    assert n == 3
+
+    df = pd.read_csv(path)
+    assert len(df) == 3
+    assert set(df["block_reason"]) == {"regime_blocked", "conf_blocked", "max_pos"}
+
+
+def test_run_replay_accepts_block_log_path():
+    """run_replay's signature must include an optional block_log_path
+    parameter so R12's CLI + driver can opt into block-reason capture."""
+    from models.engine_replay_backtest import run_replay
+    import inspect
+    sig = inspect.signature(run_replay)
+    assert "block_log_path" in sig.parameters, (
+        "run_replay must accept block_log_path: Path | None for R12 "
+        "block-reason instrumentation")
+    # Default must be None — preserves R11 behaviour for any caller
+    # that doesn't pass the new arg.
+    assert sig.parameters["block_log_path"].default is None

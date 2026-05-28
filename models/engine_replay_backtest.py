@@ -96,6 +96,83 @@ def precompute_features(raw_df: pd.DataFrame) -> pd.DataFrame:
     return engineer_features(raw_df)
 
 
+# ── R12 block-reason instrumentation ─────────────────────────────────
+
+
+class BlockReasonLogger:
+    """Capture engine-side block actions during replay for post-hoc
+    analysis. Each call to ``maybe_record`` inspects the
+    ``_process_symbol`` return dict; if the ``_action`` is one of the
+    known engine gates, a row is appended. Records are in-memory
+    until ``flush`` writes them to CSV at run end.
+
+    R12 use case: drives the `logs/r12_block_reasons.csv` artifact
+    that informs R10 SL-widening + P45 adaptive-cooldown priorities.
+    """
+
+    # Mirrors the block-action strings _process_symbol returns + the
+    # tick_counts dict keys in run_intraday_session. If a future engine
+    # commit adds a new gate, the test
+    # test_block_reason_logger_recognises_all_engine_gate_actions flags
+    # the missing coverage.
+    BLOCK_ACTIONS = frozenset({
+        "regime_blocked",
+        "conf_blocked",
+        "cooldown",            # P30 SL cooldown
+        "target_cooldown",     # R7-A target cooldown
+        "max_pos",
+        "time_cutoff",         # R7-B 14:00 IST
+        "exposure_capped",     # P28
+        "daily_loss_halt",     # P28
+        "daily_count_capped",  # P28
+    })
+
+    CSV_HEADER = "symbol,timestamp,block_reason,signal,confidence,regime\n"
+
+    def __init__(self) -> None:
+        self.records: list[dict] = []
+
+    def maybe_record(self, symbol: str, clock,
+                       result, prediction_row=None) -> None:
+        """If ``result`` looks like a block, append a row. Silently
+        no-ops on None / non-dict / non-block returns."""
+        if not isinstance(result, dict):
+            return
+        action = result.get("_action")
+        if action not in self.BLOCK_ACTIONS:
+            return
+        rec = {
+            "symbol": symbol,
+            "timestamp": str(clock),
+            "block_reason": action,
+            "signal": None,
+            "confidence": None,
+            "regime": None,
+        }
+        if prediction_row is not None:
+            try:
+                rec["signal"] = prediction_row["signal"]
+                rec["confidence"] = float(prediction_row["confidence"])
+                rec["regime"] = prediction_row["regime"]
+            except Exception:
+                pass
+        self.records.append(rec)
+
+    def flush(self, path: Path) -> int:
+        """Write records to CSV. Returns the row count (data rows
+        only, not counting the header). Always writes the header
+        even when records is empty, so downstream readers don't have
+        to special-case missing files."""
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not self.records:
+            path.write_text(self.CSV_HEADER, encoding="utf-8")
+            return 0
+        df = pd.DataFrame(self.records)
+        df.to_csv(path, index=False)
+        return len(df)
+
+
 # ── Patch builder ───────────────────────────────────────────────────
 
 
@@ -253,6 +330,7 @@ def run_replay(
     sandbox_db_path: Path,
     portfolio_value: float = 500_000.0,
     progress_every: int = 100,
+    block_log_path: Path | None = None,
 ) -> dict:
     """Replay the engine across ``holdout_start -> holdout_end`` 5m
     bars for the given ``symbols``. Returns a metrics dict matching
@@ -430,6 +508,10 @@ def run_replay(
         ensemble.predict_with_confidence = types.MethodType(_patched_predict, ensemble)
 
     # ── 5. Install patches manually + run replay loop ────────────────
+    # R12 — optional block-reason logger. None when block_log_path is
+    # not set, so existing callers see zero behaviour change.
+    block_logger = BlockReasonLogger() if block_log_path is not None else None
+
     wall_start = time.time()
     originals = _install_engine_patches(ctx)
     n_eval = 0
@@ -460,8 +542,20 @@ def run_replay(
                     continue
                 ctx.current_symbol = sym
                 try:
-                    eng._process_symbol(sym, ensemble, portfolio_value=portfolio_value)
+                    result = eng._process_symbol(
+                        sym, ensemble, portfolio_value=portfolio_value)
                     n_eval += 1
+                    # R12: capture block reasons. Pull the prediction
+                    # row for this (sym, clock) so the CSV carries
+                    # confidence + regime for each blocked decision.
+                    if block_logger is not None:
+                        pred_row = None
+                        if causal_safe and sym in predictions_by_symbol:
+                            try:
+                                pred_row = predictions_by_symbol[sym].loc[t]
+                            except KeyError:
+                                pred_row = None
+                        block_logger.maybe_record(sym, t, result, pred_row)
                 except Exception as e:
                     print(f"  [replay] WARN {sym}@{t}: {type(e).__name__}: {e}")
 
@@ -493,6 +587,13 @@ def run_replay(
     wall_clock_secs = time.time() - wall_start
     print(f"[replay] complete: {len(timeline)} ticks, {n_eval} "
           f"symbol-evals, {wall_clock_secs:.0f}s wall-clock")
+
+    # ── 5b. Flush block-reason log if requested (R12) ────────────────
+    n_blocks_logged = 0
+    if block_logger is not None and block_log_path is not None:
+        n_blocks_logged = block_logger.flush(Path(block_log_path))
+        print(f"[replay] block-reason log: {n_blocks_logged} rows -> "
+              f"{block_log_path}")
 
     # ── 6. Compute metrics from sandbox paper_trades ─────────────────
     import sqlite3
@@ -553,6 +654,8 @@ def run_replay(
         "holdout_end": str(holdout_end.date()),
         "ensemble_path": str(ensemble_path),
         "skipped_symbols": skipped,
+        "block_log_path": str(block_log_path) if block_log_path else None,
+        "n_blocks_logged": n_blocks_logged,
     }
 
 
@@ -620,6 +723,12 @@ def _cli() -> int:
                           help="Starting cash for the sandbox (default 500_000)")
     parser.add_argument("--progress-every", type=int, default=500,
                           help="Print one progress line every N ticks")
+    parser.add_argument(
+        "--block-log", default=None,
+        help="(R12) Path to write per-tick block-reason CSV. Each row: "
+              "symbol, timestamp, block_reason (regime/conf/cooldown/etc), "
+              "signal, confidence, regime. Omit to skip block logging.",
+    )
     args = parser.parse_args()
 
     # Resolve --symbols → list
@@ -648,6 +757,7 @@ def _cli() -> int:
         sandbox_db_path=Path(args.sandbox_db),
         portfolio_value=float(args.portfolio),
         progress_every=int(args.progress_every),
+        block_log_path=Path(args.block_log) if args.block_log else None,
     )
 
     out_path = Path(args.output)
