@@ -201,14 +201,18 @@ def test_patch_alerts_are_noops(monkeypatch, tmp_sandbox_db):
 
 
 def test_patch_engineer_features_returns_precomputed(monkeypatch, sample_raw_bars):
-    """Patched engineer_features (in engine namespace) must return
-    the precomputed featured slice for ctx.current_symbol ending at
-    ctx.current_clock — NOT recompute features per tick (5x perf
-    optimisation)."""
+    """Patched engineer_features (at features.engineer source) must
+    return the precomputed featured slice for ctx.current_symbol
+    ending at ctx.current_clock — NOT recompute features per tick
+    (5x perf optimisation).
+
+    The engine's _process_symbol uses ``from features.engineer
+    import engineer_features`` (local import at L271 of
+    intraday/engine.py), so the patch must live on the source module
+    not on intraday.engine."""
     from models.engine_replay_backtest import (
         ReplayContext, apply_engine_patches, precompute_features,
     )
-    import intraday.engine as eng
 
     ctx = ReplayContext()
     ctx.raw_by_symbol["RELIANCE.NS"] = sample_raw_bars
@@ -218,9 +222,9 @@ def test_patch_engineer_features_returns_precomputed(monkeypatch, sample_raw_bar
 
     apply_engine_patches(monkeypatch, ctx)
 
-    # Call engineer_features via the engine's namespace (matches what
-    # _process_symbol does internally).
-    feat = eng.engineer_features(sample_raw_bars)
+    # Mirror the engine's call shape: fresh local import (after patch).
+    from features.engineer import engineer_features
+    feat = engineer_features(sample_raw_bars)
     assert isinstance(feat, pd.DataFrame)
     # Must not return rows after the replay clock — no data leakage
     assert feat.index.max() <= ctx.current_clock
