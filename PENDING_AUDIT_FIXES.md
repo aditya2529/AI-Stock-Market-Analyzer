@@ -2133,6 +2133,58 @@ May 25, 13:20 IST. Reproducible from `paper_trades` table in
 
 ---
 
+## P50. Engine doesn't detect NSE market holidays — trades on stale prices (HIGH)
+
+**Status:** OPEN — observed live by ops on May 28, 2026 (Eid-ul-Fitr holiday).
+
+**Symptom:** NSE was closed for Eid. yfinance returned stale Wed May 27 closing
+prices for all symbols. Engine treated them as today's "current" prices and:
+- Opened 2 positions (ABFRL, ONGC) on phantom data at ~09:15-09:25 IST
+- Held them all "session"
+- Force-closed at 15:15 IST with -₹412 and -₹432
+- Day P&L: -₹844 on fake prices
+
+**Proof:** `/api/market/indices` returned `is_stale: true` and
+`last_bar_date: 2026-05-27` for NIFTY 50, SENSEX, BANK NIFTY, NIFTY IT —
+no May 28 bars published by NSE.
+
+**Why this is HIGH:**
+- Same bug will recur every public holiday — there are ~15-20 NSE
+  holidays per year
+- Each holiday day costs ~₹500-2000 in phantom losses
+- Engine's "is market open" check is purely time-of-day based
+  (`_market_open()` returns True if Mon-Fri 09:15-15:30 IST) — does not
+  check the actual NSE trading calendar
+- Real-money launch is impossible without this fix — would actually
+  send orders to broker on holidays
+
+**Suggested fix:**
+1. Add `is_trading_day(date)` helper that checks the actual NSE
+   holiday calendar. Two sources:
+   - Hard-code 2026 NSE holiday dates (~15 entries) in config.py
+   - OR fetch from yfinance `^NSEI` recent bars — if today's date is
+     missing from the last 5 trading-day bars, it's a holiday
+2. Wire into engine startup + every tick
+3. If holiday detected: log "NSE holiday — skipping session", send
+   one Telegram alert at 09:10 IST, exit cleanly
+
+**Don't fix:**
+- Engine's existing `_market_open()` time check (keep for after-hours
+  safety)
+- The two phantom trades already in paper_trades — leave for forensics
+
+**Estimated effort:** Audit team ~2-3 hours. Add to R12 backlog or
+ship as a quick R11.5 patch before next NSE holiday.
+
+**Next NSE holidays (likely):**
+- Bakri Eid (Eid-ul-Adha) — early June
+- Independence Day — Aug 15
+- Multiple in October/November (Diwali week)
+
+Critical to fix before any of these.
+
+---
+
 ## P49. Backtest vs live PF gap — 2.39 vs 0.69 (CRITICAL — investigate before any more strategy changes)
 
 **Status:** OPEN — surfaced May 27 23:35 IST by R9 holdout backtest.
