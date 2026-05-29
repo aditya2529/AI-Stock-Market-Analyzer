@@ -300,6 +300,58 @@ Rollback (if anything goes wrong tomorrow):
   3. `git revert 98ca061 8739c11` and push
   4. Re-launch engine via scheduled task
   Total downtime: ~5 min.
+
+---
+
+## ⭐ NEXT SESSION — Wednesday June 3 — START HERE
+
+**User's committed priority: build a SCALPER first, THEN swing. Try scalper
+properly ONCE before giving up on it.**
+
+### What we learned (May 29, R13 Stage 2)
+- Tried to make v2b trade more by lowering conf floor (0.60 → 0.55).
+- Result: STILL only 8 trades across 5 months at every floor (0.55/0.57/0.58).
+- Conclusion: conf floor is NOT the bottleneck. v2b structurally doesn't
+  generate enough BUY signals — most of its raw signals sit at 0.40-0.50,
+  below any reasonable floor.
+- v2b is a low-frequency "sniper" (8 trades, 100% win) — closer to swing
+  than scalping.
+
+### Why we don't have a good scalper yet
+- v1 = fast trader (many trades) → bled money (PF ~0.69)
+- v2b = slow trader (few trades) → wins but rarely (PF high, ~2 trades/month)
+- We have NOT yet built "fast AND accurate." That's the actual hard problem.
+
+### THE ONE THING TO DO WEDNESDAY (user's call: try scalper properly, once)
+**Aggressive retrain — v2-scalper / "v3"**
+Brief the audit team to retrain explicitly FOR trade frequency:
+  - Shorten label lookahead (INTRADAY_LOOKAHEAD: 6 bars → 3 bars =
+    predict 15-min moves instead of 30-min → more frequent signals)
+  - Lower the label thresholds (INTRADAY_BUY/SELL_THRESHOLD: 0.003 →
+    0.0015 = flag smaller moves → more BUY labels in training)
+  - This makes the model SEE more opportunities by design
+  - Then engine-replay it on the SAME 2026-01-01 → 2026-05-28 OOS window
+  - Honest gate: trade-count > 24 AND PF > 1.3
+    (must trade more AND stay profitable — the scalper's twin test)
+
+### The decision tree after v3 retrain
+- v3 trades a lot (>24) AND PF > 1.3 → ✅ SCALPER FOUND. Ship it.
+- v3 trades a lot but PF < 1.0 → scalping bleeds (same as v1). Accept that
+  fast+accurate is too hard here → PIVOT TO SWING.
+- v3 trades same ~8 → the model architecture can't do frequency on this
+  data → PIVOT TO SWING.
+
+### Known issue blocking retrains
+- LSTM-phase silent crash on Windows after 15-25 min sustained CPU
+  (v2b attempt#1, v2c both died here; v2b attempt#2 + R12 v2b succeeded).
+  OOM ruled out (RAM monitor showed healthy headroom). Suspected thermal
+  or PyTorch CPU bug. RETRY usually works. Keep laptop cool + plugged in.
+  File as P-item. May need to cap LSTM epochs or add checkpointing.
+
+### Reminder
+Scalper attempt is ONE shot, done properly. If v3 doesn't deliver
+fast+accurate, we stop fighting intraday and move to swing — no more
+"just one more tweak" loops.
 - Lifetime PF read at Day-5: if ≥ 1.5 → STOP, don't apply any overlays, just scale capital
 - If lifetime PF < 1.5 → execute the 4-week sequence below
 
