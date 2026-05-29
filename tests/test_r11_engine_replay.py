@@ -429,3 +429,126 @@ def test_run_replay_accepts_block_log_path():
     # Default must be None — preserves R11 behaviour for any caller
     # that doesn't pass the new arg.
     assert sig.parameters["block_log_path"].default is None
+
+
+# ── F. R13 Stage 2+3 extensions ──────────────────────────────────────
+
+
+def test_run_replay_accepts_conf_floor_override():
+    """R13 Stage 2 — conf_floor_override param plumbs through to the
+    engine via SIGNAL_MIN_CONFIDENCE env var so the conf-floor sweep
+    can run 3 replays at 0.55 / 0.57 / 0.58 without modifying config.py.
+    Default None preserves the production 0.60 floor."""
+    from models.engine_replay_backtest import run_replay
+    import inspect
+    sig = inspect.signature(run_replay)
+    assert "conf_floor_override" in sig.parameters
+    assert sig.parameters["conf_floor_override"].default is None
+
+
+def test_run_replay_accepts_sector_filter():
+    """R13 Stage 3 — sector_filter param accepts a callable that
+    given (symbol, clock) returns True iff the symbol's sector is
+    bullish. Engine-replay's monkey-patch on paper_trading.executor.try_open
+    refuses BUYs in bearish sectors. Default None preserves R11/R12
+    behaviour bit-for-bit."""
+    from models.engine_replay_backtest import run_replay
+    import inspect
+    sig = inspect.signature(run_replay)
+    assert "sector_filter" in sig.parameters
+    assert sig.parameters["sector_filter"].default is None
+
+
+def test_sector_momentum_filter_module_surface():
+    """R13 Stage 3 — sector momentum helper exposes the required
+    public surface for the engine-replay harness + future live wiring."""
+    from models.r13_sector_momentum import (
+        SYMBOL_TO_SECTOR, SECTOR_TO_SYMBOLS,
+        SectorMomentumFilter, make_sector_filter,
+    )
+    # 25 DEFAULT_SYMBOLS all mapped
+    assert len(SYMBOL_TO_SECTOR) == 25
+    # At least one symbol per sector
+    assert all(len(syms) >= 1 for syms in SECTOR_TO_SYMBOLS.values())
+    # The factory builds something callable
+    f = make_sector_filter({})
+    assert callable(f)
+
+
+def test_sector_momentum_filter_returns_true_on_unknown_symbol():
+    """An unmapped symbol must NOT be silently filtered out — return
+    True so the caller doesn't accidentally block trades on tickers
+    that aren't in the sector map."""
+    from models.r13_sector_momentum import make_sector_filter
+    f = make_sector_filter({})
+    assert f("UNKNOWN.NS", pd.Timestamp("2026-05-29 10:00:00")) is True
+
+
+def test_sector_momentum_filter_detects_bullish_basket():
+    """When the sector basket's mean pct-change > threshold, the
+    filter returns True. Synthetic data: 4 IT stocks all up 1%."""
+    from models.r13_sector_momentum import make_sector_filter
+    day = pd.Timestamp("2026-05-29")
+    raw = {}
+    for sym in ("TCS.NS", "INFY.NS", "WIPRO.NS", "HCLTECH.NS"):
+        idx = pd.DatetimeIndex([
+            day + pd.Timedelta(hours=9, minutes=15),
+            day + pd.Timedelta(hours=10),
+            day + pd.Timedelta(hours=11),
+        ], name="time")
+        raw[sym] = pd.DataFrame({
+            "open":   [100.0, 100.5, 101.0],
+            "high":   [101.0, 101.5, 102.0],
+            "low":    [ 99.5, 100.0, 100.5],
+            "close":  [100.5, 101.0, 101.0],   # +1% by 11:00
+            "volume": [1000, 1000, 1000],
+        }, index=idx)
+    f = make_sector_filter(raw)
+    assert f("TCS.NS", day + pd.Timedelta(hours=11)) is True
+
+
+def test_sector_momentum_filter_detects_bearish_basket():
+    """Mean pct-change <= threshold → False. 4 IT stocks all down 1%."""
+    from models.r13_sector_momentum import make_sector_filter
+    day = pd.Timestamp("2026-05-29")
+    raw = {}
+    for sym in ("TCS.NS", "INFY.NS", "WIPRO.NS", "HCLTECH.NS"):
+        idx = pd.DatetimeIndex([
+            day + pd.Timedelta(hours=9, minutes=15),
+            day + pd.Timedelta(hours=10),
+            day + pd.Timedelta(hours=11),
+        ], name="time")
+        raw[sym] = pd.DataFrame({
+            "open":   [100.0, 99.5, 99.0],
+            "high":   [101.0, 100.0, 99.5],
+            "low":    [ 99.0, 99.0, 98.5],
+            "close":  [ 99.5, 99.0, 99.0],     # -1% by 11:00
+            "volume": [1000, 1000, 1000],
+        }, index=idx)
+    f = make_sector_filter(raw)
+    assert f("TCS.NS", day + pd.Timedelta(hours=11)) is False
+
+
+def test_sector_momentum_filter_caches_per_sector_clock():
+    """Calling is_bullish for two stocks in the same sector at the
+    same clock must hit the cache on the second call — confirms the
+    O(constituents) computation isn't repeated for every symbol."""
+    from models.r13_sector_momentum import SectorMomentumFilter
+    day = pd.Timestamp("2026-05-29")
+    raw = {}
+    for sym in ("TCS.NS", "INFY.NS", "WIPRO.NS", "HCLTECH.NS"):
+        idx = pd.DatetimeIndex([day + pd.Timedelta(hours=9, minutes=15),
+                                  day + pd.Timedelta(hours=10)], name="time")
+        raw[sym] = pd.DataFrame({
+            "open": [100.0, 100.5], "high": [101.0, 101.0],
+            "low": [99.5, 100.0], "close": [100.5, 101.0],
+            "volume": [1000, 1000],
+        }, index=idx)
+    f = SectorMomentumFilter(raw)
+    clock = day + pd.Timedelta(hours=10)
+    f.is_bullish("TCS.NS", clock)
+    f.is_bullish("INFY.NS", clock)   # same sector, same clock
+    # 2 calls but only 1 distinct cache key — n_calls counts BOTH,
+    # cache size is 1.
+    assert f.n_calls == 2
+    assert len(f._cache) == 1

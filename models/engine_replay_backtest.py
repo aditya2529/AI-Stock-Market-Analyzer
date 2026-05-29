@@ -331,6 +331,8 @@ def run_replay(
     portfolio_value: float = 500_000.0,
     progress_every: int = 100,
     block_log_path: Path | None = None,
+    conf_floor_override: float | None = None,
+    sector_filter=None,
 ) -> dict:
     """Replay the engine across ``holdout_start -> holdout_end`` 5m
     bars for the given ``symbols``. Returns a metrics dict matching
@@ -512,6 +514,49 @@ def run_replay(
     # not set, so existing callers see zero behaviour change.
     block_logger = BlockReasonLogger() if block_log_path is not None else None
 
+    # R13 Stage 2 — conf-floor override. Engine's _process_symbol reads
+    # SIGNAL_MIN_CONFIDENCE from os.getenv on every tick, so setting
+    # the env var once at the start of the replay is sufficient. We
+    # save the prior value and restore it in the finally block so
+    # this run doesn't leak the override into other replays / tests.
+    import os as _os
+    _saved_conf_floor_env = _os.environ.get("SIGNAL_MIN_CONFIDENCE")
+    if conf_floor_override is not None:
+        _os.environ["SIGNAL_MIN_CONFIDENCE"] = f"{float(conf_floor_override):.4f}"
+        print(f"[replay] conf-floor override active: "
+              f"SIGNAL_MIN_CONFIDENCE={_os.environ['SIGNAL_MIN_CONFIDENCE']}")
+
+    # R13 Stage 3 — sector-momentum filter. Monkey-patches
+    # paper_trading.executor.try_open so BUYs in bearish sectors get
+    # silently refused (return None). Engine's existing "if opened: …"
+    # branch handles None as "open failed, move on" cleanly. Tracked
+    # in the harness for post-run diagnostics; NOT routed through the
+    # block-reason logger (those are engine-side gates; this is an
+    # executor-side filter).
+    _saved_try_open = None
+    n_sector_refused = 0
+    if sector_filter is not None:
+        from paper_trading import executor as _exec_mod
+        _saved_try_open = _exec_mod.try_open
+
+        def _patched_try_open(symbol, signal_row, next_open, portfolio_value):
+            nonlocal n_sector_refused
+            try:
+                ok = sector_filter(symbol, ctx.current_clock)
+            except Exception as e:
+                # Sector filter errors must NOT crash the replay —
+                # fall through to original behaviour.
+                print(f"  [replay] sector filter error for {symbol}: {e}")
+                ok = True
+            if not ok:
+                n_sector_refused += 1
+                return None
+            return _saved_try_open(symbol, signal_row, next_open, portfolio_value)
+
+        _exec_mod.try_open = _patched_try_open
+        print(f"[replay] sector_filter active "
+              f"({type(sector_filter).__name__})")
+
     wall_start = time.time()
     originals = _install_engine_patches(ctx)
     n_eval = 0
@@ -583,6 +628,16 @@ def run_replay(
             ensemble.predict_with_confidence = _original_predict
         except Exception:
             pass
+        # R13 — restore conf-floor env var
+        if conf_floor_override is not None:
+            if _saved_conf_floor_env is None:
+                _os.environ.pop("SIGNAL_MIN_CONFIDENCE", None)
+            else:
+                _os.environ["SIGNAL_MIN_CONFIDENCE"] = _saved_conf_floor_env
+        # R13 — restore try_open
+        if sector_filter is not None and _saved_try_open is not None:
+            from paper_trading import executor as _exec_mod
+            _exec_mod.try_open = _saved_try_open
 
     wall_clock_secs = time.time() - wall_start
     print(f"[replay] complete: {len(timeline)} ticks, {n_eval} "
@@ -656,6 +711,10 @@ def run_replay(
         "skipped_symbols": skipped,
         "block_log_path": str(block_log_path) if block_log_path else None,
         "n_blocks_logged": n_blocks_logged,
+        # R13 diagnostics
+        "conf_floor_override": conf_floor_override,
+        "sector_filter_active": sector_filter is not None,
+        "n_sector_refused": n_sector_refused,
     }
 
 
