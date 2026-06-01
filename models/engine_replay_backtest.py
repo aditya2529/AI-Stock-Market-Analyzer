@@ -413,6 +413,15 @@ def run_replay(
             "check market_data.db population")
 
     # ── 2. NOW redirect DB to sandbox + bootstrap paper-trading state
+    # R13 hotfix — save the production DB_PATH before redirecting so
+    # the finally block can restore it. Without this, calling
+    # run_replay twice in one process leaves DB_PATH pointing at the
+    # first sandbox; the second call's load_ohlcv reads an empty DB
+    # and the symbol-data check raises "no symbols had usable 5m data".
+    # Surfaced during R13 Stage 2 sweep (3 sequential run_replay
+    # calls); R11/R12 only called run_replay once per process so the
+    # bug was hidden.
+    _saved_db_path = db_mod.DB_PATH
     db_mod.DB_PATH = str(sandbox_db_path)
     init_db()
     init_paper_tables()
@@ -638,6 +647,10 @@ def run_replay(
         if sector_filter is not None and _saved_try_open is not None:
             from paper_trading import executor as _exec_mod
             _exec_mod.try_open = _saved_try_open
+        # R13 hotfix — restore data.database.DB_PATH so a SUBSEQUENT
+        # run_replay call in the same process reads from the real DB,
+        # not this run's sandbox. (Bug surfaced during Stage 2 sweep.)
+        db_mod.DB_PATH = _saved_db_path
 
     wall_clock_secs = time.time() - wall_start
     print(f"[replay] complete: {len(timeline)} ticks, {n_eval} "

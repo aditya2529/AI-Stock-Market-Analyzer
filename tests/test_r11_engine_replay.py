@@ -529,6 +529,30 @@ def test_sector_momentum_filter_detects_bearish_basket():
     assert f("TCS.NS", day + pd.Timedelta(hours=11)) is False
 
 
+def test_run_replay_restores_db_path_in_finally(monkeypatch):
+    """R13 regression — run_replay must save + restore
+    ``data.database.DB_PATH`` so a SECOND call in the same process
+    reads from the real DB, not the previous run's sandbox.
+
+    Bug surfaced during R13 Stage 2 sweep (3 sequential run_replay
+    calls): replay #1 worked; replay #2 raised "no symbols had usable
+    5m data" because DB_PATH still pointed at replay #1's empty sandbox.
+    """
+    import data.database as db_mod
+    from models.engine_replay_backtest import run_replay
+    import inspect
+
+    # Source-level check: the impl must save DB_PATH before the
+    # redirect AND restore it in the finally block. We inspect the
+    # source rather than monkey-patching the whole replay loop
+    # (which would require a full ensemble + DB fixture).
+    src = inspect.getsource(run_replay)
+    assert "_saved_db_path = db_mod.DB_PATH" in src, (
+        "run_replay must save the production DB_PATH before redirecting")
+    assert "db_mod.DB_PATH = _saved_db_path" in src, (
+        "run_replay must restore DB_PATH in the finally block")
+
+
 def test_sector_momentum_filter_caches_per_sector_clock():
     """Calling is_bullish for two stocks in the same sector at the
     same clock must hit the cache on the second call — confirms the
