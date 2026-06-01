@@ -50,19 +50,26 @@ class Ensemble:
             lookahead: int = None,
             buy_threshold: float = None,
             sell_threshold: float = None,
-            vol_scaled: bool = False) -> "Ensemble":
+            vol_scaled: bool = False,
+            sigma_mult: float = 0.5) -> "Ensemble":
         """Train all layers on df (must have feature columns + OHLCV).
 
         Uses first 80% for training, last 20% for meta-model calibration.
         Lookahead/thresholds override config defaults (used for intraday mode).
-        vol_scaled=True (Q1 audit fix) anchors labels at 0.5x rolling sigma
-        instead of a fixed pct — required on 5-min bars where the fixed
-        threshold sits at the noise floor.
+        vol_scaled=True (Q1 audit fix) anchors labels at sigma_mult * rolling
+        sigma instead of a fixed pct — required on 5-min bars where the
+        fixed threshold sits at the noise floor.
+
+        R14 introduced ``sigma_mult`` (default 0.5 = unchanged Q1 cutoff)
+        so the v3 scalper retrain can pass ``sigma_mult=0.25`` for a tighter
+        cutoff and ~2-3x label density. The kwarg is plumbed straight
+        through to ``make_labels`` — no other behaviour changes.
         """
         labels = make_labels(df, lookahead=lookahead,
                              buy_threshold=buy_threshold,
                              sell_threshold=sell_threshold,
-                             vol_scaled=vol_scaled)
+                             vol_scaled=vol_scaled,
+                             sigma_mult=sigma_mult)
         valid = labels.notna()
         df_v = df[valid]
         labels_v = labels[valid]

@@ -27,13 +27,20 @@ def make_labels(df: pd.DataFrame,
                 lookahead: int = None,
                 buy_threshold: float = None,
                 sell_threshold: float = None,
-                vol_scaled: bool = False) -> pd.Series:
+                vol_scaled: bool = False,
+                sigma_mult: float = 0.5) -> pd.Series:
     """Create forward-return labels: BUY / SELL / HOLD.
 
-    If vol_scaled=True (Q1 audit fix), threshold is 0.5 * rolling-sigma of
-    forward returns instead of a fixed pct. Anchors the cutoff above the
-    noise floor on intraday bars where the fixed 0.3% ~= 1 sigma is noise.
-    The fixed-threshold path is preserved for the daily model's calibration.
+    If vol_scaled=True (Q1 audit fix), threshold is ``sigma_mult * rolling-
+    sigma`` of forward returns instead of a fixed pct. Default
+    ``sigma_mult=0.5`` matches the original Q1 audit cutoff bit-for-bit
+    — every pre-R14 caller sees identical labels.
+
+    R14 introduced the kwarg so the v3 scalper retrain can pass
+    ``sigma_mult=0.25`` (tighter cutoff → ~2-3x label density) while
+    preserving the noise-floor protection vol_scaled=True provides.
+    The fixed-threshold path (vol_scaled=False) is unaffected by
+    sigma_mult and continues to use the bt/st cutoffs.
     """
     la  = lookahead      if lookahead      is not None else LABEL_LOOKAHEAD
     bt  = buy_threshold  if buy_threshold  is not None else BUY_THRESHOLD
@@ -42,8 +49,8 @@ def make_labels(df: pd.DataFrame,
     labels = pd.Series("HOLD", index=df.index)
     if vol_scaled:
         sigma = fwd_return.rolling(500, min_periods=100).std()
-        labels[fwd_return >=  0.5 * sigma] = "BUY"
-        labels[fwd_return <= -0.5 * sigma] = "SELL"
+        labels[fwd_return >=  sigma_mult * sigma] = "BUY"
+        labels[fwd_return <= -sigma_mult * sigma] = "SELL"
     else:
         labels[fwd_return >= bt] = "BUY"
         labels[fwd_return <= st] = "SELL"
