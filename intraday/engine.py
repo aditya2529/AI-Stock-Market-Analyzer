@@ -165,15 +165,28 @@ def _p28_daily_gate_block(symbol: str) -> dict | None:
                     TOTAL_EXPOSURE_CAP * 100)
         return {"_action": "exposure_capped", "symbol": symbol}
 
+    # R17 — compute "today" via Python from datetime.now(IST) instead of
+    # SQL date('now','localtime'). Two reasons:
+    #   (1) the replay harness patches intraday.engine.datetime via
+    #       FakeDatetime — the Python-side date flows through it cleanly,
+    #       so cap behavior in replay matches production. The old SQL
+    #       date('now','localtime') was SQLite-side and unpatchable,
+    #       causing replay to collapse "today" into whatever wall-clock
+    #       day the sweep ran on (R16 P0).
+    #   (2) regardless of replay, anchoring "today" to IST is what the
+    #       trading semantics actually want — even a server that boots
+    #       in UTC would now compute the right day for an IST trading
+    #       session. Belt-and-braces.
+    today_iso = datetime.now(IST).date().isoformat()
     conn = sqlite3.connect(str(_db_mod.DB_PATH), check_same_thread=False)
     try:
         today_pnl = float(conn.execute(
             "SELECT COALESCE(SUM(net_pnl), 0) FROM paper_trades "
-            "WHERE date(exit_time) = date('now','localtime')"
+            "WHERE date(exit_time) = ?", (today_iso,)
         ).fetchone()[0])
         today_closed_count = int(conn.execute(
             "SELECT COUNT(*) FROM paper_trades "
-            "WHERE date(exit_time) = date('now','localtime')"
+            "WHERE date(exit_time) = ?", (today_iso,)
         ).fetchone()[0])
     finally:
         conn.close()

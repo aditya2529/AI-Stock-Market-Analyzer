@@ -184,6 +184,10 @@ def _build_patches(ctx: ReplayContext) -> list[tuple]:
     import intraday.engine as eng
     import alerts.dispatcher as ad
     import features.engineer as feat_mod
+    # R17 — patch paper_trading.portfolio.datetime so trade-writer
+    # entry_time / exit_time flow through the replay clock instead of
+    # leaking wall-clock UTC. R16 P0.
+    import paper_trading.portfolio as port_mod
 
     # 1. _fetch_intraday — historical slice ending at ctx.current_clock
     def _patched_fetch_intraday(symbol: str):
@@ -258,6 +262,23 @@ def _build_patches(ctx: ReplayContext) -> list[tuple]:
                 else:
                     ts = ts.tz_convert(tz)
             return ts.to_pydatetime()
+
+        @classmethod
+        def utcnow(cls):
+            """R17 — paper_trading.portfolio writes entry_time / exit_time
+            via ``datetime.utcnow().isoformat()``. Without this method the
+            class would AttributeError when patched onto port_mod. Replay
+            convention: ``ctx.current_clock`` is a tz-naive timestamp
+            already in IST (matches how callers pass holdout_start). So
+            ``replay_clock_naive -> localize IST -> convert UTC -> naive
+            UTC`` gives the right UTC instant of the replay bar."""
+            if ctx.current_clock is None:
+                return datetime.utcnow()
+            ts = ctx.current_clock
+            if ts.tz is None:
+                ts = ts.tz_localize(IST)
+            return ts.tz_convert("UTC").to_pydatetime().replace(tzinfo=None)
+
         fromisoformat = staticmethod(datetime.fromisoformat)
         fromtimestamp = staticmethod(datetime.fromtimestamp)
         # __sub__ / __add__ on the class itself aren't used by engine
@@ -279,6 +300,8 @@ def _build_patches(ctx: ReplayContext) -> list[tuple]:
         (eng, "_seconds_to_next_bar", _patched_seconds_to_next_bar),
         (eng, "date", _FakeDate),
         (eng, "datetime", _FakeDatetime),
+        # R17 — trade-writer datetime patch (R16 P0)
+        (port_mod, "datetime", _FakeDatetime),
         (ad, "on_signal", _noop),
         (ad, "on_trade_closed", _noop),
         (ad, "on_portfolio_snapshot", _noop),
