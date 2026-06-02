@@ -189,24 +189,35 @@ def _build_patches(ctx: ReplayContext) -> list[tuple]:
     # leaking wall-clock UTC. R16 P0.
     import paper_trading.portfolio as port_mod
 
-    # 1. _fetch_intraday — historical slice ending at ctx.current_clock
+    # 1. _fetch_intraday — historical slice ending strictly BEFORE
+    #    ctx.current_clock. R18 fix: bars in OHLCV are stamped at OPEN
+    #    time, so the bar at index T carries OHLC for [T, T+5min) —
+    #    its `close` resolves 5 minutes after T. An inclusive slice
+    #    (`<=`) gave the engine 5-min forward info, producing the
+    #    10x backtest-vs-live PF gap surfaced by R18. Live's
+    #    yf.Ticker.history only returns bars that have closed, so live
+    #    sees `featured.iloc[-1]` at index T-5min — exactly what
+    #    strict-less-than reproduces here.
     def _patched_fetch_intraday(symbol: str):
         raw = ctx.raw_by_symbol.get(symbol)
         if raw is None or ctx.current_clock is None:
             return None
-        slice_df = raw.loc[raw.index <= ctx.current_clock]
+        slice_df = raw.loc[raw.index < ctx.current_clock]
         # Match engine contract: returns None when not enough bars for
         # the 30-bar minimum _process_symbol enforces just below.
         return slice_df if len(slice_df) >= 30 else None
 
-    # 2. engineer_features (engine namespace) — precomputed slice
+    # 2. engineer_features (engine namespace) — precomputed slice.
+    #    R18 fix: strict less-than, same reason as _patched_fetch_intraday
+    #    above. Without this, every rolling indicator's last value
+    #    embeds 5-min-future close information.
     def _patched_engineer_features(df: pd.DataFrame):
         sym = ctx.current_symbol
         clock = ctx.current_clock
         if (sym is not None and sym in ctx.featured_by_symbol
                 and clock is not None):
             feat = ctx.featured_by_symbol[sym]
-            return feat.loc[feat.index <= clock]
+            return feat.loc[feat.index < clock]
         # Fallback for tests that don't set ctx — call the real one.
         from features.engineer import engineer_features as _real
         return _real(df)
@@ -538,7 +549,12 @@ def run_replay(
                     or clock is None):
                 return _original_predict(df)
             pred_full = predictions_by_symbol[sym]
-            return pred_full.loc[pred_full.index <= clock]
+            # R18 fix: strict less-than. Predictions at index T were
+            # computed from features whose last row contains bar-T's
+            # close (5-min future). Live cannot see those predictions
+            # at wall-clock T — only ones from features ending at
+            # T-5min are causally valid.
+            return pred_full.loc[pred_full.index < clock]
         ensemble.predict_with_confidence = types.MethodType(_patched_predict, ensemble)
 
     # ── 5. Install patches manually + run replay loop ────────────────
