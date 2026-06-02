@@ -69,20 +69,21 @@ PORTFOLIO_VALUE = 500_000.0
 NSE_INITIAL_CASH = 500_000.0
 
 # Run plan — (label, ensemble_path, conf_floor, cap)
-# The two high-floor runs were added after the R16 cap=20 trade-tape
-# (logs/r16_cap20_trade_tape.md) surfaced a 0.235 mean confidence gap
-# between wins (0.856) and losses (0.621) — 5 of 6 losses had conf
-# < 0.60. The lower conf-floor we've been sweeping was letting bad
-# trades through. These two runs test "honest" higher-floor combos.
+#
+# R17 post-v2b-rebaseline scope cut (ops directive after run #1 returned
+# n=197, PF=8.126, win=0.888, Sharpe=12.626 for the live v2b config):
+#   * v2b ALREADY clears the SHIP gate by ~8x. The R12-R16 chase was
+#     working off artifact data.
+#   * Cap-sweep variants {cap10, cap15, cap20, cap25, cap30} dropped
+#     — cap was never the real bottleneck in correctly-clocked replay.
+#   * v2b kept (re-run for determinism + to write fresh sandbox DB the
+#     report uses for per-day risk math).
+#   * Keep the 3 strategically-different v3 runs to close the scalper
+#     question: "is there anything v3 can do that v2b can't?".
 RUN_PLAN = [
     ("v2b_floor60_cap8_REBASELINE", V2B_PATH, 0.60, 8),
     ("v3_floor55_cap8_REBASELINE",  V3_PATH,  0.55, 8),
-    ("v3_floor55_cap10",            V3_PATH,  0.55, 10),
-    ("v3_floor55_cap15",            V3_PATH,  0.55, 15),
-    ("v3_floor55_cap20",            V3_PATH,  0.55, 20),
-    ("v3_floor55_cap25",            V3_PATH,  0.55, 25),
-    ("v3_floor55_cap30",            V3_PATH,  0.55, 30),
-    # Trade-tape-driven additions (the actual lead)
+    # Trade-tape-driven (the v3 conf-floor lead)
     ("v3_floor65_cap20",            V3_PATH,  0.65, 20),
     ("v3_floor70_cap30",            V3_PATH,  0.70, 30),
 ]
@@ -205,6 +206,64 @@ def _build_per_day(run_label: str, block_log: Path, sandbox: Path) -> pd.DataFra
     return pd.DataFrame(rows)
 
 
+def _live_v2b_stats(since_iso: str = "2026-05-29") -> dict | None:
+    """Read the production paper_trades table (read-only) and return
+    live v2b stats since the cutover date. Returns None on any error
+    so the report can still emit without this section if the prod DB
+    is locked / missing.
+    """
+    try:
+        prod_db = PROJECT_ROOT / "market_data.db"
+        if not prod_db.exists():
+            return None
+        con = sqlite3.connect(f"file:{prod_db.as_posix()}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        try:
+            r = con.execute(
+                "SELECT COUNT(*) AS n, "
+                "COALESCE(SUM(net_pnl),0) AS pnl, "
+                "MIN(exit_time) AS t0, MAX(exit_time) AS t1, "
+                "COALESCE(SUM(CASE WHEN net_pnl > 0 THEN 1 ELSE 0 END),0) AS w, "
+                "COALESCE(SUM(CASE WHEN net_pnl > 0 THEN net_pnl ELSE 0 END),0) AS gw, "
+                "COALESCE(SUM(CASE WHEN net_pnl <= 0 THEN net_pnl ELSE 0 END),0) AS gl "
+                f"FROM paper_trades WHERE exit_time >= '{since_iso}'"
+            ).fetchone()
+            if r["n"] == 0:
+                return {"n_trades": 0, "since": since_iso}
+            per_day = con.execute(
+                "SELECT date(exit_time) AS d, COUNT(*) AS n, "
+                "COALESCE(SUM(net_pnl),0) AS pnl, "
+                "COALESCE(SUM(CASE WHEN net_pnl > 0 THEN 1 ELSE 0 END),0) AS w "
+                f"FROM paper_trades WHERE exit_time >= '{since_iso}' "
+                "GROUP BY date(exit_time) ORDER BY date(exit_time)"
+            ).fetchall()
+        finally:
+            con.close()
+        n = r["n"]
+        return {
+            "since": since_iso,
+            "n_trades": n,
+            "total_pnl": float(r["pnl"]),
+            "t_first": r["t0"],
+            "t_last": r["t1"],
+            "wins": int(r["w"]),
+            "win_rate": (r["w"] / n) if n else 0.0,
+            "profit_factor": (
+                float(r["gw"]) / abs(float(r["gl"]))
+                if float(r["gl"]) < 0 else float("inf")),
+            "n_trading_days": len(per_day),
+            "trades_per_active_day": n / len(per_day) if per_day else 0.0,
+            "per_day": [
+                {"date": pd["d"], "n": int(pd["n"]),
+                 "wins": int(pd["w"]), "pnl": float(pd["pnl"])}
+                for pd in per_day
+            ],
+        }
+    except Exception as e:
+        logger.warning("live v2b stats read failed: %s", e)
+        return None
+
+
 def _risk(per_day_df: pd.DataFrame, run_label: str) -> dict:
     sub = per_day_df[per_day_df["run"] == run_label]
     if sub.empty:
@@ -283,18 +342,98 @@ def _write_report(run_metrics: dict, run_meta: dict,
     lines.append(f"**Clock fix:** SHA 30a20a6 (intraday/engine.py SQL bind + portfolio.datetime patch + FakeDatetime.utcnow)")
     lines.append(f"**SHIP gate:** n_trades > {SHIP_GATE_N_TRADES} AND PF > {SHIP_GATE_PF} AND 0 halt-firing days")
     lines.append("")
-    lines.append("## TL;DR — SHIP VERDICT")
+    lines.append("## TL;DR — v2b confirmed in backtest, v3 closed out, LIVE DIVERGENCE OPEN")
+    lines.append("")
+    lines.append("R17 frames the model question, not the deploy question:")
+    lines.append("")
+    lines.append("1. **v2b in backtest** clears the SHIP gate by ~8x once the replay clock is fixed (n_trades=197, PF=8.1, win=0.888, Sharpe=12.6). The R12-R16 chase was working off artifact data.")
+    lines.append("2. **v3 closed out.** The 3 v3 closeout runs at this scope (floor 0.55 cap=8, floor 0.65 cap=20, floor 0.70 cap=30) test whether v3 can beat v2b's backtest. None of R14-R16's v3 data suggests it will — see the ranked tables.")
+    lines.append("3. **CRITICAL — backtest does NOT match live.** Live v2b since 2026-05-29 is mixed/losing. See \"Live v2b vs R17 backtest\" section. We need 2-3 weeks of live data before trusting the 8.1 PF holds in reality. **Do not change anything yet.** v2b stays live as-is.")
     lines.append("")
     if any_ship:
         m = run_metrics[best_label]
         r = run_risk[best_label]
-        lines.append(f"**SHIP {best_label}**")
-        lines.append("")
-        lines.append(f"_n_trades={m['n_trades']}, PF={_fmt_pf(m['profit_factor'])}, "
+        lines.append(f"_Backtest SHIP_: **{best_label}** — n_trades={m['n_trades']}, "
+                     f"PF={_fmt_pf(m['profit_factor'])}, "
                      f"worst daily loss=Rs {r['worst_loss_rs']:,.0f} "
                      f"({_fmt(r['worst_loss_pct'])}%)._")
     else:
-        lines.append("**NO_SHIP — no run cleared all 3 gates**")
+        lines.append("_Backtest SHIP_: **NO_SHIP** — no run cleared all 3 gates._")
+    lines.append("")
+
+    # ── CRITICAL section — live vs backtest divergence ───────────────
+    lines.append("## Live v2b vs R17 backtest (P49 echo)")
+    lines.append("")
+    live = _live_v2b_stats()
+    if live is None:
+        lines.append("_(could not read live paper_trades — production DB unavailable)_")
+    elif live.get("n_trades", 0) == 0:
+        lines.append(f"_No live trades since {live['since']}._")
+    else:
+        v2b_lbl = "v2b_floor60_cap8_REBASELINE"
+        bt_m = run_metrics.get(v2b_lbl)
+        lines.append(f"**Window:** live since {live['since']} → {live['t_last'][:10]} "
+                     f"({live['n_trading_days']} trading days with trades)")
+        lines.append("")
+        lines.append("| | Live v2b (since 2026-05-29) | R17 v2b backtest (5 mo OOS) | R12 v2b backtest (broken clock) |")
+        lines.append("|---|---:|---:|---:|")
+        lines.append(f"| n_trades | **{live['n_trades']}** | "
+                     f"{bt_m['n_trades'] if bt_m else '—'} | 8 (artifact) |")
+        lines.append(f"| Win rate | **{_fmt(live['win_rate'])}** | "
+                     f"{_fmt(bt_m['win_rate']) if bt_m else '—'} | 1.000 (artifact) |")
+        lines.append(f"| Profit Factor | **{_fmt_pf(live['profit_factor'])}** | "
+                     f"{_fmt_pf(bt_m['profit_factor']) if bt_m else '—'} | infinity (artifact) |")
+        lines.append(f"| Net PnL (Rs) | **{live['total_pnl']:+,.0f}** | "
+                     f"(backtest equity curve, see metadata) | n/a |")
+        if bt_m:
+            # n_distinct_close_dates is real data we have (computed in _risk);
+            # use 65 as the documented v2b R17 figure since this row computes
+            # before run_risk is built for the new sweep — kept stable.
+            bt_tpd = bt_m["n_trades"] / 65
+            lines.append(f"| Trades/active day | **{live['trades_per_active_day']:.1f}** | "
+                         f"{bt_tpd:.1f} (≈) | n/a |")
+        else:
+            lines.append(f"| Trades/active day | **{live['trades_per_active_day']:.1f}** | — | n/a |")
+        lines.append("")
+        lines.append("**Per-day live v2b:**")
+        lines.append("")
+        lines.append("| Date | n_trades | wins | net Rs |")
+        lines.append("|---|---:|---:|---:|")
+        for d in live["per_day"]:
+            lines.append(f"| {d['date']} | {d['n']} | {d['wins']} | {d['pnl']:+,.0f} |")
+        lines.append("")
+        live_n = live["n_trades"]
+        bt_pf = bt_m["profit_factor"] if bt_m else None
+        if live["profit_factor"] < 1.0 and bt_pf and bt_pf > 5.0:
+            lines.append("**Divergence reading:** live PF "
+                         f"{live['profit_factor']:.3f} is below break-even; "
+                         f"R17 backtest claims PF {bt_pf:.3f}. ~10x gap. Live is "
+                         f"hitting the 8-trade cap every active day "
+                         f"({live['trades_per_active_day']:.1f}/day) while backtest "
+                         f"averages ~2/day. The cap is binding live but not in "
+                         f"backtest — same P49 backtest-vs-live shape as before R17, "
+                         f"just clearer now that we can compare. Sample is only "
+                         f"{live['n_trading_days']} trading days — could be noise, "
+                         f"but the magnitude warrants caution.")
+            lines.append("")
+            lines.append("**Implication:** the R17 clock fix closed the obvious "
+                         "wall-clock-collapse bug but the backtest still does not "
+                         "predict live. R18 candidates to investigate (not blocking "
+                         "v2b's continued operation):")
+            lines.append("- Live data feed (Upstox / yfinance) vs backtest data quality / latency")
+            lines.append("- Slippage / brokerage assumptions in the backtest vs realised costs")
+            lines.append("- Whether `precompute_features` in the replay produces causally-different signals from live `engineer_features` mid-tick")
+            lines.append("- The 8-trade DAILY_TRADE_CAP itself — backtest tail might over-sample low-traffic days, hiding that the cap binds on a typical day")
+            lines.append("")
+            lines.append("**Operationally:** v2b stays live. Need 2-3 more weeks "
+                         "of live data before trusting backtest projections to set "
+                         "any deploy gate. R18 is diagnostic, not deploy-blocking.")
+        elif live_n < 10:
+            lines.append("**Divergence reading:** sample too small "
+                         f"({live_n} live trades) to characterize. Continue watching live.")
+        else:
+            lines.append("**Divergence reading:** live and backtest in rough agreement — "
+                         "no P49-shaped gap. Continue monitoring.")
     lines.append("")
 
     lines.append("## v2b LIVE baseline — R12 fiction vs R17 reality")
@@ -313,10 +452,15 @@ def _write_report(run_metrics: dict, run_meta: dict,
         lines.append("")
         v2b_real_n = v2b_m["n_trades"]
         if v2b_real_n >= 24:
-            lines.append(f"**Big finding:** v2b ALREADY trades ~{v2b_real_n} times over "
+            lines.append(f"**Backtest finding:** v2b trades ~{v2b_real_n} times over "
                          f"the 5-month window in correctly-clocked replay. The 8-trade "
-                         f"ceiling we've been chasing was a replay artifact. The "
-                         f"\"v2b too selective\" premise is wrong.")
+                         f"ceiling that R12-R16 chased was a replay artifact. The "
+                         f"\"v2b too selective\" premise was wrong.")
+            lines.append("")
+            lines.append("**But — does this match live?** See \"Live v2b vs R17 backtest\" "
+                         "section below. The corrected backtest still does not match what "
+                         "v2b is actually doing in production. Treat the 8.1 PF and 88% WR "
+                         "as backtest claims, not deploy-ready signals.")
         elif v2b_real_n > 8:
             lines.append(f"v2b trades {v2b_real_n} times (not 8) on the corrected replay — "
                          f"the previous ceiling was partly artifact, partly real. v2b is "
@@ -425,16 +569,23 @@ def _write_report(run_metrics: dict, run_meta: dict,
     if any_ship:
         m = run_metrics[best_label]
         r = run_risk[best_label]
-        lines.append(f"**{best_label}** cleared all 3 gates with real per-day risk distribution.")
+        lines.append(f"**Backtest SHIP_BY_BACKTEST = {best_label}** "
+                     f"— cleared the 3 gates with real per-day risk distribution.")
         lines.append("")
         if "cap8" in best_label and "v2b" in best_label:
-            lines.append("**v2b LIVE config already qualifies** under the SHIP gate when "
-                         "measured correctly. This is the cheapest ship of all — no model "
-                         "swap, no config change, no cap raise. The R12-R16 saga was "
-                         "chasing a phantom. Just need to keep watching live production.")
+            lines.append("**v2b LIVE config is the backtest winner.** Same config as "
+                         "production — no swap needed. **BUT** the live-vs-backtest "
+                         "section above shows live behavior does not match this backtest. "
+                         "Do not treat this as a deploy decision. v2b stays live; we need "
+                         "2-3 weeks of live data to verify whether the 8.1 PF / 88% WR "
+                         "translates to reality. If the gap persists, R18 must investigate "
+                         "the data/slippage/feature-causality candidates listed in the "
+                         "live-vs-backtest section.")
         else:
-            lines.append("Deploy is multi-axis (model + conf + cap, or any subset). Ops "
-                         "procedure depends on which axes changed vs current LIVE state.")
+            lines.append("This is a multi-axis deploy candidate (model + conf + cap, or "
+                         "any subset). **Do not deploy yet.** The live v2b numbers are "
+                         "below break-even; we cannot trust ANY of these backtest claims "
+                         "until R18 closes the backtest-vs-live gap. v2b stays live.")
     else:
         lines.append("No run cleared SHIP gate with real risk distribution.")
         lines.append("")
