@@ -241,8 +241,22 @@ def _ship(metrics: dict, risk: dict) -> bool:
 
 
 def _write_report(run_metrics: dict, run_meta: dict,
-                  per_day_df: pd.DataFrame, run_risk: dict) -> tuple[bool, str | None]:
-    ship_labels = [lbl for lbl, _, _, _ in RUN_PLAN
+                  per_day_df: pd.DataFrame, run_risk: dict,
+                  completed_labels: list | None = None,
+                  is_partial: bool = False) -> tuple[bool, str | None]:
+    """Build the markdown report.
+
+    R17 ops directive: must emit even on partial completion (so a
+    TaskScheduler kill mid-run #9 still leaves runs #1-8 readable).
+    ``completed_labels`` restricts iteration to runs that actually
+    landed; ``is_partial`` adds a banner so ops sees this clearly.
+    """
+    all_labels = [lbl for lbl, _, _, _ in RUN_PLAN]
+    if completed_labels is None:
+        completed_labels = all_labels
+    pending_labels = [lbl for lbl in all_labels if lbl not in completed_labels]
+
+    ship_labels = [lbl for lbl in completed_labels
                    if _ship(run_metrics[lbl], run_risk[lbl])]
     any_ship = bool(ship_labels)
     best_label = None
@@ -257,6 +271,13 @@ def _write_report(run_metrics: dict, run_meta: dict,
     lines = []
     lines.append("# R17 — re-baseline + re-sweep (replay clock fix in place)")
     lines.append("")
+    if is_partial:
+        lines.append(f"> ⚠️ **PARTIAL REPORT** — {len(completed_labels)} of "
+                     f"{len(all_labels)} runs completed. Pending: "
+                     f"{', '.join(pending_labels) if pending_labels else 'none'}. "
+                     f"This file rewrites after every successful run, so it "
+                     f"reflects the latest state even if the process is killed.")
+        lines.append("")
     lines.append(f"**Holdout window:** {HOLDOUT_START.date()} -> {HOLDOUT_END.date()}")
     lines.append(f"**Symbols:** {len(DEFAULT_SYMBOLS)} (DEFAULT_SYMBOLS)")
     lines.append(f"**Clock fix:** SHA 30a20a6 (intraday/engine.py SQL bind + portfolio.datetime patch + FakeDatetime.utcnow)")
@@ -312,11 +333,16 @@ def _write_report(run_metrics: dict, run_meta: dict,
     lines.append("|---|---:|---:|---:|---:|---:|---:|---:|:---:|")
     for label, _, floor, cap in RUN_PLAN:
         old = R16_NUMBERS.get(label)
-        new_m = run_metrics[label]
-        new_r = run_risk[label]
         old_pf = _fmt_pf(old["pf"]) if old else "—"
         old_n = str(old["n_trades"]) if old else "—"
         old_days = "1 (artifact)" if old else "—"
+        if label not in completed_labels:
+            lines.append(
+                f"| {label} | {old_pf} | — | {old_n} | — | {old_days} | "
+                f"— | — | (pending) |")
+            continue
+        new_m = run_metrics[label]
+        new_r = run_risk[label]
         ship_flag = "✓" if _ship(new_m, new_r) else "✗"
         lines.append(
             f"| {label} | {old_pf} | {_fmt_pf(new_m['profit_factor'])} | "
@@ -325,13 +351,13 @@ def _write_report(run_metrics: dict, run_meta: dict,
             f"Rs {new_r['worst_loss_rs']:,.0f} | {ship_flag} |")
     lines.append("")
 
-    # Two ranked views (per ops R17 expansion ask)
+    # Two ranked views (per ops R17 expansion ask) — only over completed runs
     def _pf_key(label):
         pf = run_metrics[label]["profit_factor"]
         return (1e9 if pf == float("inf") else pf)
 
-    by_pf = sorted([lbl for lbl, _, _, _ in RUN_PLAN], key=_pf_key, reverse=True)
-    by_n = sorted([lbl for lbl, _, _, _ in RUN_PLAN],
+    by_pf = sorted(completed_labels, key=_pf_key, reverse=True)
+    by_n = sorted(completed_labels,
                    key=lambda lbl: run_metrics[lbl]["n_trades"], reverse=True)
 
     lines.append("## Ranked by PF (descending)")
@@ -367,6 +393,9 @@ def _write_report(run_metrics: dict, run_meta: dict,
     lines.append("| Variant | days w/ trades | worst daily loss (Rs) | worst (%) | halt-firing days | avg loss/losing day |")
     lines.append("|---|---:|---:|---:|---:|---:|")
     for label, _, _, _ in RUN_PLAN:
+        if label not in completed_labels:
+            lines.append(f"| {label} | (pending) | — | — | — | — |")
+            continue
         r = run_risk[label]
         worst = f"{r['worst_loss_rs']:,.0f}" if r["worst_loss_rs"] < 0 else "0"
         avg = f"{r['avg_loss_on_losing_days_rs']:,.0f}" if r["avg_loss_on_losing_days_rs"] < 0 else "0"
@@ -381,6 +410,9 @@ def _write_report(run_metrics: dict, run_meta: dict,
     lines.append("| Variant | wall_secs | sandbox db | block log |")
     lines.append("|---|---:|---|---|")
     for label, _, _, _ in RUN_PLAN:
+        if label not in completed_labels:
+            lines.append(f"| {label} | (pending) | — | — |")
+            continue
         meta = run_meta[label]
         lines.append(
             f"| {label} | {_fmt(meta.get('wall_clock_secs'), 1)} | "
@@ -462,73 +494,114 @@ def main() -> int:
     run_metrics: dict[str, dict] = {}
     run_meta: dict[str, dict] = {}
     run_runs: dict[str, dict] = {}
+    completed_labels: list[str] = []
+
+    # Captured by reference into _emit so the success-summary Telegram
+    # block at end of main() can read the latest risk dict without
+    # rebuilding it.
+    latest_run_risk: dict = {}
+
+    def _emit(is_partial: bool) -> tuple[bool, str | None]:
+        """Build per-day CSV + report from whatever has completed.
+
+        Idempotent: safe to call after every run (it just rewrites the
+        files with the latest state). Catches its own exceptions so a
+        failure here can never abort the sweep loop.
+        """
+        try:
+            if not completed_labels:
+                return False, None
+            per_day_frames = []
+            for lbl in completed_labels:
+                rr = run_runs[lbl]
+                per_day_frames.append(
+                    _build_per_day(lbl, rr["block_log"], rr["sandbox"]))
+            per_day_df = (pd.concat(per_day_frames, ignore_index=True)
+                          if per_day_frames else pd.DataFrame())
+            TIMELINE_CSV.parent.mkdir(parents=True, exist_ok=True)
+            per_day_df.to_csv(TIMELINE_CSV, index=False)
+            run_risk = {lbl: _risk(per_day_df, lbl) for lbl in completed_labels}
+            latest_run_risk.clear()
+            latest_run_risk.update(run_risk)
+            return _write_report(run_metrics, run_meta, per_day_df,
+                                 run_risk, completed_labels=completed_labels,
+                                 is_partial=is_partial)
+        except Exception as e:
+            logger.exception("Report emission failed (%s): %s",
+                             "partial" if is_partial else "final", e)
+            return False, None
 
     wall_total = time.time()
 
-    for i, (label, ens_path, floor, cap) in enumerate(RUN_PLAN, start=1):
-        sandbox = PROJECT_ROOT / "logs" / f"r17_sandbox_{label}.db"
-        block_log = PROJECT_ROOT / "logs" / f"r17_block_reasons_{label}.csv"
-        if sandbox.exists():
-            sandbox.unlink()
-        logger.info("--- [%d/%d] %s (floor=%.2f cap=%d) ---",
-                    i, len(RUN_PLAN), label, floor, cap)
-        original_cap = _patch_cap(cap)
-        t0 = time.time()
-        try:
-            result = run_replay(
-                symbols=DEFAULT_SYMBOLS,
-                holdout_start=HOLDOUT_START,
-                holdout_end=HOLDOUT_END,
-                ensemble_path=ens_path,
-                sandbox_db_path=sandbox,
-                portfolio_value=PORTFOLIO_VALUE,
-                progress_every=400,
-                block_log_path=block_log,
-                conf_floor_override=floor,
-            )
-        except Exception as e:
-            logger.exception("%s CRASHED: %s", label, e)
-            _telegram(f"[R17] {label} CRASHED: {type(e).__name__}: {e}")
-            _restore_cap(original_cap)
-            return 2
-        finally:
-            _restore_cap(original_cap)
+    try:
+        for i, (label, ens_path, floor, cap) in enumerate(RUN_PLAN, start=1):
+            sandbox = PROJECT_ROOT / "logs" / f"r17_sandbox_{label}.db"
+            block_log = PROJECT_ROOT / "logs" / f"r17_block_reasons_{label}.csv"
+            if sandbox.exists():
+                sandbox.unlink()
+            logger.info("--- [%d/%d] %s (floor=%.2f cap=%d) ---",
+                        i, len(RUN_PLAN), label, floor, cap)
+            original_cap = _patch_cap(cap)
+            t0 = time.time()
+            try:
+                result = run_replay(
+                    symbols=DEFAULT_SYMBOLS,
+                    holdout_start=HOLDOUT_START,
+                    holdout_end=HOLDOUT_END,
+                    ensemble_path=ens_path,
+                    sandbox_db_path=sandbox,
+                    portfolio_value=PORTFOLIO_VALUE,
+                    progress_every=400,
+                    block_log_path=block_log,
+                    conf_floor_override=floor,
+                )
+            except Exception as e:
+                logger.exception("%s CRASHED: %s", label, e)
+                _telegram(
+                    f"[R17] {label} CRASHED at run {i}/{len(RUN_PLAN)}: "
+                    f"{type(e).__name__}: {e}. Emitting partial report with "
+                    f"{len(completed_labels)} prior runs.")
+                _emit(is_partial=True)
+                return 2
+            finally:
+                _restore_cap(original_cap)
 
-        elapsed = time.time() - t0
-        m = result["metrics"]
-        logger.info("%s done in %.0fs (%.1f min) metrics=%s",
-                    label, elapsed, elapsed / 60, m)
-        run_metrics[label] = m
-        run_meta[label] = result
-        run_runs[label] = {"block_log": block_log, "sandbox": sandbox}
+            elapsed = time.time() - t0
+            m = result["metrics"]
+            logger.info("%s done in %.0fs (%.1f min) metrics=%s",
+                        label, elapsed, elapsed / 60, m)
+            run_metrics[label] = m
+            run_meta[label] = result
+            run_runs[label] = {"block_log": block_log, "sandbox": sandbox}
+            completed_labels.append(label)
 
-        pf_str = "inf" if m["profit_factor"] == float("inf") else f"{m['profit_factor']:.3f}"
+            pf_str = "inf" if m["profit_factor"] == float("inf") else f"{m['profit_factor']:.3f}"
+            _telegram(
+                f"[R17] {label} done — n={m['n_trades']}, PF={pf_str}, "
+                f"win={m['win_rate']:.3f}, wall={elapsed/60:.1f}min ({i}/{len(RUN_PLAN)}).")
+
+            # R17 ops directive: emit partial report after every successful
+            # run so a TaskScheduler 6-hour kill mid-#9 still leaves
+            # runs #1-8 readable on disk. ~2s overhead per run.
+            partial_is_complete = (len(completed_labels) == len(RUN_PLAN))
+            _emit(is_partial=not partial_is_complete)
+    except KeyboardInterrupt:
+        logger.info("KeyboardInterrupt — emitting partial report and exiting")
         _telegram(
-            f"[R17] {label} done — n={m['n_trades']}, PF={pf_str}, "
-            f"win={m['win_rate']:.3f}, wall={elapsed/60:.1f}min ({i}/{len(RUN_PLAN)}).")
+            f"[R17] interrupted at run {len(completed_labels) + 1}/{len(RUN_PLAN)}. "
+            f"Partial report saved.")
+        _emit(is_partial=True)
+        return 3
 
     total = time.time() - wall_total
     logger.info("=== %d runs done in %.0fs (%.1f min) ===",
                 len(RUN_PLAN), total, total / 60)
 
-    logger.info("Building per-day timeline + risk math …")
-    per_day_frames = []
-    for label, _, _, _ in RUN_PLAN:
-        rr = run_runs[label]
-        df = _build_per_day(label, rr["block_log"], rr["sandbox"])
-        per_day_frames.append(df)
-    per_day_df = pd.concat(per_day_frames, ignore_index=True) if per_day_frames else pd.DataFrame()
-    TIMELINE_CSV.parent.mkdir(parents=True, exist_ok=True)
-    per_day_df.to_csv(TIMELINE_CSV, index=False)
-    logger.info("Per-day timeline -> %s (%d rows)", TIMELINE_CSV, len(per_day_df))
+    any_ship, best_label = _emit(is_partial=False)
 
-    run_risk = {label: _risk(per_day_df, label) for label, _, _, _ in RUN_PLAN}
-
-    any_ship, best_label = _write_report(run_metrics, run_meta, per_day_df, run_risk)
-
-    if any_ship:
+    if any_ship and best_label is not None and best_label in latest_run_risk:
         m = run_metrics[best_label]
-        r = run_risk[best_label]
+        r = latest_run_risk[best_label]
         pf_str = "inf" if m["profit_factor"] == float("inf") else f"{m['profit_factor']:.3f}"
         _telegram(
             f"[R17 re-sweep] SHIP — best={best_label} "
@@ -537,9 +610,11 @@ def main() -> int:
             f"halt-days={r['n_halt_firing_days']}. "
             f"Report {REPORT_PATH.name}.")
     else:
+        # Summarize first up to 3 completed runs so the Telegram payload
+        # stays tight even if only a couple landed.
         summary = ", ".join(
             f"{lbl}=n{run_metrics[lbl]['n_trades']}"
-            for lbl, _, _, _ in RUN_PLAN[:3])
+            for lbl in completed_labels[:3])
         _telegram(
             f"[R17 re-sweep] NO_SHIP — {summary} … v2b stays live. "
             f"Report {REPORT_PATH.name}.")
