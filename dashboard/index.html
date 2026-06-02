@@ -497,6 +497,19 @@ let equityChart = null;
 // ── Helpers ──
 const $ = (id) => document.getElementById(id);
 const fmt = (n, d = 0) => n == null || isNaN(n) ? "—" : Number(n).toLocaleString("en-IN", { maximumFractionDigits: d, minimumFractionDigits: d });
+// Engine stores trade timestamps in UTC (datetime.utcnow). Convert to IST
+// (UTC + 5:30) for display. Returns "MM-DD HH:MM" in IST.
+function utcToIst(isoStr) {
+  if (!isoStr) return "—";
+  const utc = new Date(isoStr.endsWith("Z") ? isoStr : isoStr + "Z");
+  if (isNaN(utc)) return isoStr.slice(5, 16).replace("T", " ");
+  const ist = new Date(utc.getTime() + 5.5 * 3600 * 1000);
+  const mm = String(ist.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(ist.getUTCDate()).padStart(2, "0");
+  const hh = String(ist.getUTCHours()).padStart(2, "0");
+  const mi = String(ist.getUTCMinutes()).padStart(2, "0");
+  return `${mm}-${dd} ${hh}:${mi}`;
+}
 const fmtPct = (p, d = 2) => p == null || isNaN(p) ? "—" : (p * 100).toFixed(d) + "%";
 const fmtSigned = (n, d = 0) => {
   if (n == null || isNaN(n)) return "—";
@@ -796,7 +809,7 @@ function renderTradesPage() {
     const ret = t.return_pct || 0;
     const r = ret / 0.01;
     const rCol = r >= 1 ? "text-green" : r <= -0.8 ? "text-red" : "text-amber";
-    const t_str = (t.exit_time || "").slice(5, 16).replace("T", " ");
+    const t_str = utcToIst(t.exit_time);
     const reasonPill = t.exit_reason === "target" ? "pill-green"
                     : t.exit_reason === "stop_loss" ? "pill-red"
                     : (t.exit_reason || "").indexOf("force") >= 0 ? "pill-amber" : "pill-muted";
@@ -908,7 +921,12 @@ async function refreshSentiment() {
   const idx = await J("/api/market/indices");
   renderTicker(idx);
   if (!idx || !idx.length) { $("sentiment-verdict").textContent = "—"; return; }
-  const core = idx.filter(i => !["INDIA VIX", "S&P 500", "NASDAQ", "DOW JONES"].includes(i.name));
+  // Broad-market verdict only — NIFTY 50 + SENSEX. Sector indices like
+  // NIFTY IT are excluded: one hot sector shouldn't flip the whole-market
+  // verdict (e.g. June 2 — broad market down, IT +2.5% was masking it).
+  const BROAD = ["NIFTY 50", "SENSEX"];
+  let core = idx.filter(i => BROAD.includes(i.name));
+  if (!core.length) core = idx.filter(i => !["INDIA VIX", "S&P 500", "NASDAQ", "DOW JONES"].includes(i.name));
   const avg = core.reduce((a, b) => a + b.change_pct, 0) / Math.max(1, core.length);
   const vix = idx.find(i => i.name === "INDIA VIX");
   let verdict, col;
